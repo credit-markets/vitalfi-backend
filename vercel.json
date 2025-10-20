@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "src/api/**.ts": {
+      "runtime": "nodejs22.x",
+      "memory": 512,
+      "maxDuration": 10
+    }
+  }
+}
