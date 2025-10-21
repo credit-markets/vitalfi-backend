@@ -145,6 +145,16 @@ export async function zadd(
 }
 
 /**
+ * Remove member from sorted set
+ */
+export async function zrem(key: string, ...members: string[]): Promise<number> {
+  const client = await getClient();
+  const prefixedKey = `${cfg.prefix}${key}`;
+  const result = await client.zRem(prefixedKey, members);
+  return result ?? 0;
+}
+
+/**
  * Get members from sorted set by score range (reverse order: max to min)
  */
 export async function zrevrangebyscore(

@@ -12,7 +12,7 @@ import { json, error } from "../../lib/http.js";
 import { verifyHeliusSignature, extractActionsFromLogs, decodeAccounts } from "../../lib/helius.js";
 import { getCoder } from "../../lib/anchor.js";
 import { toVaultDTO, toPositionDTO, toActivityDTO } from "../../lib/normalize.js";
-import { setJSON, sadd, zadd, setnx, batchOperations } from "../../lib/kv.js";
+import { setJSON, sadd, zadd, zrem, setnx, batchOperations, getJSON } from "../../lib/kv.js";
 import {
   kVaultJson,
   kVaultsSet,
@@ -144,16 +144,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const vaultData = item.data as import("../../lib/anchor.js").DecodedVault;
         const dto = toVaultDTO(item.pda, vaultData, payload.slot, payload.blockTime);
 
+        // Check if vault exists to detect status changes
+        const existingVault = await getJSON<import("../../types/dto.js").VaultDTO>(kVaultJson(item.pda));
+
         // Batch all vault operations including ZSET for ordering
         // Also write to per-status ZSET for efficient filtered queries
-        accountOperations.push(
+        const vaultOps: Promise<unknown>[] = [
           setJSON(kVaultJson(item.pda), dto),
           sadd(kVaultsSet(), item.pda),
           sadd(kAuthorityVaults(dto.authority), item.pda),
           zadd(kAuthorityVaultsByUpdated(dto.authority), dto.updatedAtEpoch, item.pda),
           zadd(kAuthorityVaultsByUpdated(dto.authority, dto.status), dto.updatedAtEpoch, item.pda)
-        );
+        ];
 
+        // If status changed, remove from old per-status ZSET to prevent stale entries
+        if (existingVault && existingVault.status !== dto.status) {
+          vaultOps.push(
+            zrem(kAuthorityVaultsByUpdated(dto.authority, existingVault.status), item.pda)
+          );
+        }
+
+        accountOperations.push(...vaultOps);
         vaultsProcessed++;
       } else if (item.type === "position") {
         const positionData = item.data as import("../../lib/anchor.js").DecodedPosition;
