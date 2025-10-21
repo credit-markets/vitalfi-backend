@@ -9,8 +9,7 @@ import { cfg } from "./env.js";
 const SECRETS_TO_REDACT = [
   cfg.heliusSecret,
   cfg.heliusApiKey,
-  process.env.REDIS_URL,
-  process.env.KV_REST_API_TOKEN,
+  cfg.redisUrl,
 ];
 
 /**

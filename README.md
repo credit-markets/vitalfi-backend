@@ -5,8 +5,8 @@ Lightweight indexing and caching layer for the VitalFi Solana program.
 ## Architecture
 
 - **Runtime**: Vercel Serverless Functions (Node.js 22)
-- **Storage**: Vercel KV (Upstash Redis)
-- **Indexer**: Helius Enhanced Webhooks
+- **Storage**: Redis (via Vercel KV)
+- **Indexer**: Helius RAW Webhooks
 - **Language**: TypeScript (strict mode)
 
 ## Setup
@@ -25,8 +25,7 @@ cp .env.example .env.local
 
 Fill in the required values:
 
-- `KV_REST_API_URL` - From Vercel KV dashboard
-- `KV_REST_API_TOKEN` - From Vercel KV dashboard
+- `REDIS_URL` - Redis connection URL (Vercel KV provides this automatically)
 - `HELIUS_WEBHOOK_SECRET` - Generate a random 256-bit secret
 - `HELIUS_API_KEY` - From Helius dashboard
 - `VITALFI_PROGRAM_ID` - VitalFi program ID (default: `146hbPFqGb9a3v3t1BtkmftNeSNqXzoydzVPk95YtJNj`)
@@ -172,7 +171,7 @@ Receives account update events from Helius.
 
 1. Go to https://dashboard.helius.dev/webhooks
 2. Create new webhook:
-   - Type: Enhanced
+   - Type: RAW
    - Accounts: `[VitalFiProgramID]`
    - Encoding: base64
    - URL: `https://your-backend.vercel.app/api/webhooks/helius?token={HELIUS_WEBHOOK_SECRET}`
@@ -251,9 +250,10 @@ Solana → Helius → POST /api/webhooks/helius → KV → GET /api/* → Fronte
 - Ensure `HELIUS_WEBHOOK_SECRET` matches in Helius dashboard and `.env.local`
 - Check that raw body is used (not parsed JSON)
 
-**KV connection fails:**
-- Verify `KV_REST_API_URL` and `KV_REST_API_TOKEN` are correct
-- Check Vercel KV is provisioned
+**Redis connection fails:**
+- Verify `REDIS_URL` is set correctly (Vercel KV provides this automatically)
+- Check Vercel KV is provisioned and linked to your project
+- Ensure the redis client singleton is properly initialized
 
 **404 on endpoints:**
 - Ensure file paths match Vercel routing: `src/api/*.ts` → `/api/*`

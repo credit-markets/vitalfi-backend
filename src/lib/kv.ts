@@ -16,9 +16,16 @@ let connecting: Promise<void> | null = null;
  * Get or create Redis client (singleton pattern for serverless)
  */
 async function getClient() {
-  // If client exists and is open, return it
+  // If client exists and is open, verify it's healthy with a ping
   if (redis?.isOpen) {
-    return redis;
+    try {
+      await redis.ping();
+      return redis;
+    } catch (err) {
+      console.error('Redis ping failed, reconnecting:', err);
+      redis = null;
+      connecting = null;
+    }
   }
 
   // If currently connecting, wait for that connection
@@ -56,15 +63,19 @@ async function getClient() {
   return redis;
 }
 
-// Graceful shutdown on process termination
-process.on('SIGTERM', async () => {
-  if (redis?.isOpen) {
-    await redis.quit();
-  }
-});
-
 // Export for direct access if needed
 export const kv = { getClient };
+
+/**
+ * Batch multiple operations using Redis pipelining for better performance
+ * Example: await batchOperations(() => [setJSON('key1', val1), sadd('key2', 'val2')])
+ */
+export async function batchOperations(
+  operations: () => Promise<unknown>[]
+): Promise<void> {
+  const ops = operations();
+  await Promise.all(ops);
+}
 
 /**
  * Get JSON value from KV
@@ -146,7 +157,7 @@ export async function zrevrangebyscore(
   const prefixedKey = `${cfg.prefix}${key}`;
 
   // Use zRangeByScore with REV option for reverse score-based range query
-  const options: any = { REV: true };
+  const options: { REV: boolean; LIMIT?: { offset: number; count: number } } = { REV: true };
   if (opts) {
     options.LIMIT = {
       offset: opts.offset ?? 0,

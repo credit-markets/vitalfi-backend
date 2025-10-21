@@ -12,7 +12,7 @@ import { json, error } from "../../lib/http.js";
 import { verifyHeliusSignature, extractActionsFromLogs, decodeAccounts } from "../../lib/helius.js";
 import { getCoder } from "../../lib/anchor.js";
 import { toVaultDTO, toPositionDTO, toActivityDTO } from "../../lib/normalize.js";
-import { setJSON, sadd, zadd, setnx } from "../../lib/kv.js";
+import { setJSON, sadd, zadd, setnx, batchOperations } from "../../lib/kv.js";
 import {
   kVaultJson,
   kVaultsSet,
@@ -26,6 +26,7 @@ import {
 import { cfg } from "../../lib/env.js";
 import { info, errorLog } from "../../lib/logger.js";
 import type { HeliusWebhookPayload } from "../../types/helius.js";
+import { heliusWebhookPayloadSchema } from "../../types/helius.js";
 
 // Configure to read raw body for HMAC verification
 export const config = {
@@ -83,28 +84,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       info("No HMAC signature provided - relying on authentication token only");
     }
 
-    // Parse JSON payload
-    let payload: HeliusWebhookPayload;
+    // Parse and validate JSON payload
+    let rawPayload: unknown;
     try {
-      payload = JSON.parse(rawBody);
+      rawPayload = JSON.parse(rawBody);
     } catch (err) {
       errorLog("Failed to parse webhook payload", err);
       return error(res, 400, "Invalid JSON payload");
     }
 
-    // Validate payload structure
-    if (!payload.accountData || !Array.isArray(payload.accountData)) {
+    // Validate payload structure with Zod
+    const validationResult = heliusWebhookPayloadSchema.safeParse(rawPayload);
+
+    if (!validationResult.success) {
       // Log the actual payload structure for debugging
-      info("Received webhook without accountData - likely a test payload", {
-        payloadKeys: Object.keys(payload),
-        hasSignature: !!payload.signature,
-        hasSlot: !!payload.slot,
+      info("Received webhook with invalid structure - likely a test payload", {
+        payloadKeys: typeof rawPayload === 'object' && rawPayload !== null ? Object.keys(rawPayload) : [],
+        validationErrors: validationResult.error.errors,
       });
 
-      // Return success for test payloads (they don't have real account data)
+      // Return success for test payloads (they don't have valid structure)
       return json(res, 200, {
         ok: true,
-        message: "Test webhook received (no accountData to process)",
+        message: "Test webhook received (invalid structure - no data to process)",
         processed: {
           vaults: 0,
           positions: 0,
@@ -112,6 +114,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
       });
     }
+
+    const payload: HeliusWebhookPayload = validationResult.data;
 
     info("Received Helius webhook", {
       signature: payload.signature,
@@ -130,35 +134,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let vaultsProcessed = 0;
     let positionsProcessed = 0;
 
-    // Process each decoded account
+    // Process each decoded account with batch operations for better performance
+    const accountOperations: Promise<unknown>[] = [];
+
     for (const item of decoded) {
       if (item.type === "vault") {
         const vaultData = item.data as import("../../lib/anchor.js").DecodedVault;
         const dto = toVaultDTO(item.pda, vaultData, payload.slot, payload.blockTime);
 
-        // Write vault JSON
-        await setJSON(kVaultJson(item.pda), dto);
-
-        // Add to global vaults set
-        await sadd(kVaultsSet(), item.pda);
-
-        // Add to authority's vaults set
-        await sadd(kAuthorityVaults(dto.authority), item.pda);
+        // Batch all vault operations
+        accountOperations.push(
+          setJSON(kVaultJson(item.pda), dto),
+          sadd(kVaultsSet(), item.pda),
+          sadd(kAuthorityVaults(dto.authority), item.pda)
+        );
 
         vaultsProcessed++;
       } else if (item.type === "position") {
         const positionData = item.data as import("../../lib/anchor.js").DecodedPosition;
         const dto = toPositionDTO(item.pda, positionData, payload.slot, payload.blockTime);
 
-        // Write position JSON
-        await setJSON(kPositionJson(item.pda), dto);
-
-        // Add to owner's positions set
-        await sadd(kOwnerPositions(dto.owner), item.pda);
+        // Batch all position operations
+        accountOperations.push(
+          setJSON(kPositionJson(item.pda), dto),
+          sadd(kOwnerPositions(dto.owner), item.pda)
+        );
 
         positionsProcessed++;
       }
     }
+
+    // Execute all account operations in parallel
+    await batchOperations(() => accountOperations);
 
     // Extract actions from logs
     const actions = extractActionsFromLogs(payload);
