@@ -38,9 +38,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { authority, status, cursor, limit } = parsed.data;
 
     // Use exclusive cursor to prevent duplicate items across pages
-    // If cursor is provided, we want items with updatedAtEpoch < cursor (strictly less than)
-    const maxScore = cursor ? cursor - 1 : Number.POSITIVE_INFINITY;
+    // Redis ZREVRANGEBYSCORE supports exclusive ranges with parentheses: (score
+    const maxScore = cursor !== undefined ? `(${cursor}` : '+inf';
     let pdas: string[];
+    let usedZset = false;
 
     // Use per-status ZSET for filtered queries, or all vaults ZSET
     const zsetKey = status
@@ -55,9 +56,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         0,
         { offset: 0, count: limit + 1 }
       );
+      usedZset = true;
     } catch (err) {
       // Fallback to SET if ZSET doesn't exist yet (with client-side filtering)
       pdas = await smembers(kAuthorityVaults(authority));
+
+      // Log warning for large SET fallbacks
+      if (pdas.length > 100) {
+        console.warn(`Large SET fallback for authority ${authority}: ${pdas.length} vaults`);
+      }
     }
 
     // Fetch all vaults in parallel
@@ -70,12 +77,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       (v): v is VaultDTO => v !== null
     );
 
-    // Only filter by status if using fallback SET (ZSET already filtered)
-    const filtered = (pdas.length > 0 && !status)
+    // Only filter by status if using SET fallback (ZSET already filtered by status)
+    const filtered = (usedZset || !status)
       ? vaults
-      : status
-        ? vaults.filter((v) => v.status === status)
-        : vaults;
+      : vaults.filter((v) => v.status === status);
 
     // Sort by updatedAtEpoch DESC (most recent first)
     filtered.sort((a, b) => b.updatedAtEpoch - a.updatedAtEpoch);

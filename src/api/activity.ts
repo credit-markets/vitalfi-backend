@@ -44,7 +44,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const zsetKey = vault ? kVaultActivity(vault) : kOwnerActivity(owner!);
 
     // Use exclusive cursor to prevent duplicate items across pages
-    const maxScore = cursor ? cursor - 1 : Number.POSITIVE_INFINITY;
+    // Redis ZREVRANGEBYSCORE supports exclusive ranges with parentheses: (score
+    // This ensures items with exactly cursor value are excluded
+    const maxScore = cursor !== undefined ? `(${cursor}` : '+inf';
 
     // Fetch activity IDs from ZSET (reverse chronological order)
     // Fetch limit+1 to detect if there are more items

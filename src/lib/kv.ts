@@ -23,6 +23,8 @@ async function getClient() {
       return redis;
     } catch (err) {
       console.error('Redis ping failed, reconnecting:', err);
+      // Gracefully close the old connection to prevent socket leaks
+      await redis.quit().catch(() => {});
       redis = null;
       connecting = null;
     }

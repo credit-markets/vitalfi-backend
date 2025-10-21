@@ -37,7 +37,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { owner, cursor, limit } = parsed.data;
 
     // Use exclusive cursor to prevent duplicate items across pages
-    const maxScore = cursor ? cursor - 1 : Number.POSITIVE_INFINITY;
+    // Redis ZREVRANGEBYSCORE supports exclusive ranges with parentheses
+    const maxScore = cursor !== undefined ? `(${cursor}` : '+inf';
     let pdas: string[];
 
     try {

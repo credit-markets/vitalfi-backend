@@ -8,6 +8,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { timingSafeEqual } from "crypto";
 import { json, error } from "../../lib/http.js";
 import { verifyHeliusSignature, extractActionsFromLogs, decodeAccounts } from "../../lib/helius.js";
 import { getCoder } from "../../lib/anchor.js";
@@ -68,8 +69,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   (req.headers.authorization as string | undefined) ||
                   (req.headers["authentication"] as string | undefined);
 
-    if (!token || token !== cfg.heliusSecret) {
+    // Use timing-safe comparison to prevent timing attacks
+    if (!token || token.length !== cfg.heliusSecret.length) {
       errorLog("Invalid or missing authentication token in webhook request");
+      return error(res, 401, "Invalid token");
+    }
+
+    const tokenMatch = timingSafeEqual(
+      Buffer.from(token),
+      Buffer.from(cfg.heliusSecret)
+    );
+
+    if (!tokenMatch) {
+      errorLog("Invalid authentication token in webhook request");
       return error(res, 401, "Invalid token");
     }
 
