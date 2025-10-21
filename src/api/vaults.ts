@@ -18,7 +18,7 @@ import type { VaultDTO } from "../types/dto.js";
 const QuerySchema = z.object({
   authority: z.string().min(32).max(44).refine(isValidPubkey, "Invalid Base58 public key"),
   status: z.enum(["Funding", "Active", "Matured", "Canceled"]).optional(),
-  cursor: z.coerce.number().int().positive().optional(),
+  cursor: z.coerce.number().int().positive().max(Math.floor(Date.now() / 1000) + 86400).optional(),
   limit: z.coerce.number().min(1).max(100).default(50),
 });
 
@@ -122,6 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     logRequest("GET", "/api/vaults", 200, Date.now() - start);
     return json(res, 200, body, etag, cfg.cacheTtl);
   } catch (err) {
+    errorLog("Vaults query failed", { query: req.query, err });
     logRequest("GET", "/api/vaults", 500, Date.now() - start);
     return error(res, 500, "Internal server error");
   }

@@ -12,14 +12,14 @@ import { json, error } from "../lib/http.js";
 import { kVaultActivity, kOwnerActivity } from "../lib/keys.js";
 import { createEtag } from "../lib/etag.js";
 import { cfg } from "../lib/env.js";
-import { logRequest } from "../lib/logger.js";
+import { logRequest, errorLog } from "../lib/logger.js";
 import { isValidPubkey } from "../lib/validation.js";
 import type { ActivityDTO } from "../types/dto.js";
 
 const QuerySchema = z.object({
   vault: z.string().min(32).max(44).refine(isValidPubkey, "Invalid Base58 public key").optional(),
   owner: z.string().min(32).max(44).refine(isValidPubkey, "Invalid Base58 public key").optional(),
-  cursor: z.coerce.number().int().positive().optional(), // Unix epoch seconds
+  cursor: z.coerce.number().int().positive().max(Math.floor(Date.now() / 1000) + 86400).optional(), // Unix epoch seconds
   limit: z.coerce.number().min(1).max(100).default(50),
 }).refine((data) => data.vault || data.owner, {
   message: "Either vault or owner must be provided",
@@ -96,6 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     logRequest("GET", "/api/activity", 200, Date.now() - start);
     return json(res, 200, body, etag, cfg.cacheTtl);
   } catch (err) {
+    errorLog("Activity query failed", { query: req.query, err });
     logRequest("GET", "/api/activity", 500, Date.now() - start);
     return error(res, 500, "Internal server error");
   }
