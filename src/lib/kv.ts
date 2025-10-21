@@ -24,12 +24,21 @@ async function getClient() {
   // If currently connecting, wait for that connection
   if (connecting) {
     await connecting;
-    return redis!;
+    if (!redis) {
+      throw new Error('Redis connection failed');
+    }
+    return redis;
   }
 
   // Create new client
-  redis = createClient({ url: process.env.REDIS_URL });
+  redis = createClient({ url: cfg.redisUrl });
   redis.on('error', (err) => console.error('Redis Client Error:', err));
+
+  // Clean up on connection end (for serverless environments)
+  redis.on('end', () => {
+    redis = null;
+    connecting = null;
+  });
 
   // Connect
   connecting = redis.connect().then(() => {
@@ -41,8 +50,18 @@ async function getClient() {
   });
 
   await connecting;
-  return redis!;
+  if (!redis) {
+    throw new Error('Redis connection failed');
+  }
+  return redis;
 }
+
+// Graceful shutdown on process termination
+process.on('SIGTERM', async () => {
+  if (redis?.isOpen) {
+    await redis.quit();
+  }
+});
 
 // Export for direct access if needed
 export const kv = { getClient };
@@ -57,7 +76,8 @@ export async function getJSON<T>(key: string): Promise<T | null> {
   if (!value) return null;
   try {
     return JSON.parse(value) as T;
-  } catch {
+  } catch (err) {
+    console.error(`Failed to parse JSON for key ${prefixedKey}:`, err);
     return null;
   }
 }
@@ -114,7 +134,7 @@ export async function zadd(
 }
 
 /**
- * Get members from sorted set by score range
+ * Get members from sorted set by score range (reverse order: max to min)
  */
 export async function zrevrangebyscore(
   key: string,
@@ -124,13 +144,17 @@ export async function zrevrangebyscore(
 ): Promise<string[]> {
   const client = await getClient();
   const prefixedKey = `${cfg.prefix}${key}`;
-  const limit = opts ? { offset: opts.offset ?? 0, count: opts.count ?? -1 } : undefined;
-  // Use zRange with REV option for reverse order (max to min)
-  const results = await client.zRange(prefixedKey, max, min, {
-    BY: 'SCORE',
-    REV: true,
-    LIMIT: limit
-  });
+
+  // Use zRangeByScore with REV option for reverse score-based range query
+  const options: any = { REV: true };
+  if (opts) {
+    options.LIMIT = {
+      offset: opts.offset ?? 0,
+      count: opts.count ?? -1,
+    };
+  }
+
+  const results = await client.zRangeByScore(prefixedKey, min, max, options);
   return results;
 }
 

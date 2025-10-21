@@ -57,13 +57,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Read raw body for HMAC verification
     const rawBody = await getRawBody(req);
 
-    // Verify token from query param OR authentication header
+    // Verify token from multiple sources for Helius webhook compatibility:
+    // - Query param: ?token={secret} (legacy/URL-based auth)
+    // - Authorization header: Used by some webhook services
+    // - Authentication header: Helius Enhanced webhooks use this
     const token = (req.query.token as string | undefined) ||
                   (req.headers.authorization as string | undefined) ||
                   (req.headers["authentication"] as string | undefined);
 
-    if (token !== cfg.heliusSecret) {
-      errorLog("Invalid token in webhook request");
+    if (!token || token !== cfg.heliusSecret) {
+      errorLog("Invalid or missing authentication token in webhook request");
       return error(res, 401, "Invalid token");
     }
 

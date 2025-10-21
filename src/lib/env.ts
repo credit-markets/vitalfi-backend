@@ -14,6 +14,9 @@ function getEnv(key: string, required = true): string {
 }
 
 export const cfg = {
+  // Redis
+  redisUrl: getEnv("REDIS_URL"),
+
   // Helius
   heliusSecret: getEnv("HELIUS_WEBHOOK_SECRET"),
   heliusApiKey: getEnv("HELIUS_API_KEY"),
