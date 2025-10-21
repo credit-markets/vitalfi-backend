@@ -6,15 +6,17 @@
 
 import { BorshCoder } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
-// @ts-expect-error IDL import from published package
-import idlJson from "@pollum-io/vitalfi-programs/idl" assert { type: "json" };
+import { createRequire } from "module";
+
+// Use createRequire to load JSON in ESM context (works in Node.js without import assertions)
+const require = createRequire(import.meta.url);
+const idlJson = require("@pollum-io/vitalfi-programs/idl");
 
 /**
  * Get Anchor BorshCoder for the VitalFi program
  */
 export function getCoder(): BorshCoder {
-  // Cast to any to avoid type issues with IDL version
-  return new BorshCoder(idlJson as any);
+  return new BorshCoder(idlJson);
 }
 
 /**

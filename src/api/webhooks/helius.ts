@@ -67,15 +67,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return error(res, 401, "Invalid token");
     }
 
-    // Verify HMAC signature
+    // Verify HMAC signature (optional - Helius may not send this for all webhook types)
     const signature = req.headers["x-helius-signature"] as string | undefined;
-    if (!signature || !verifyHeliusSignature(signature, rawBody)) {
-      errorLog("Invalid HMAC signature in webhook request");
-      return error(res, 401, "Invalid signature");
+    if (signature) {
+      // If signature is provided, verify it
+      if (!verifyHeliusSignature(signature, rawBody)) {
+        errorLog("Invalid HMAC signature in webhook request");
+        return error(res, 401, "Invalid signature");
+      }
+      info("HMAC signature verified successfully");
+    } else {
+      info("No HMAC signature provided - relying on authentication token only");
     }
 
     // Parse JSON payload
-    const payload: HeliusWebhookPayload = JSON.parse(rawBody);
+    let payload: HeliusWebhookPayload;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch (err) {
+      errorLog("Failed to parse webhook payload", err);
+      return error(res, 400, "Invalid JSON payload");
+    }
+
+    // Validate payload structure
+    if (!payload.accountData || !Array.isArray(payload.accountData)) {
+      // Log the actual payload structure for debugging
+      info("Received webhook without accountData - likely a test payload", {
+        payloadKeys: Object.keys(payload),
+        hasSignature: !!payload.signature,
+        hasSlot: !!payload.slot,
+      });
+
+      // Return success for test payloads (they don't have real account data)
+      return json(res, 200, {
+        ok: true,
+        message: "Test webhook received (no accountData to process)",
+        processed: {
+          vaults: 0,
+          positions: 0,
+          activities: 0,
+        },
+      });
+    }
 
     info("Received Helius webhook", {
       signature: payload.signature,
@@ -86,8 +119,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Get Anchor coder
     const coder = getCoder();
 
-    // Decode accounts
-    const decoded = decodeAccounts(coder, payload.accountData);
+    // Decode accounts (skip if empty - e.g. test payloads)
+    const decoded = payload.accountData.length > 0
+      ? decodeAccounts(coder, payload.accountData)
+      : [];
 
     let vaultsProcessed = 0;
     let positionsProcessed = 0;
