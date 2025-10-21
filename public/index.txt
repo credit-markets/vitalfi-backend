@@ -1,0 +1,31 @@
+VitalFi API - Solana Vault Indexing
+
+ENDPOINTS:
+
+GET  /api/health
+     Health check
+
+GET  /api/vaults?authority={pubkey}&status={status}&limit={n}
+     List vaults by authority
+     - authority (required): Authority pubkey
+     - status (optional): Funding | Active | Matured | Canceled
+     - limit (optional): Max items (default 50, max 100)
+
+GET  /api/positions?owner={pubkey}&limit={n}
+     List positions by owner
+     - owner (required): User wallet pubkey
+     - limit (optional): Max items (default 50, max 100)
+
+GET  /api/activity?vault={pda}&cursor={timestamp}&limit={n}
+GET  /api/activity?owner={pubkey}&cursor={timestamp}&limit={n}
+     Activity feed (paginated)
+     - vault OR owner (required): Exactly one required
+     - cursor (optional): ISO timestamp for pagination
+     - limit (optional): Page size (default 50, max 100)
+
+POST /api/webhooks/helius?token={secret}
+     Helius webhook endpoint
+     - Requires authentication token in query or header
+
+---
+Program ID: 146hbPFqGb9a3v3t1BtkmftNeSNqXzoydzVPk95YtJNj

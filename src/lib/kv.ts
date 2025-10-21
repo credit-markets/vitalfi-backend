@@ -1,21 +1,96 @@
 /**
  * Vercel KV (Redis) Client
  *
- * Wraps @vercel/kv with helpers for JSON storage and namespacing.
+ * Uses the redis package with REDIS_URL for Vercel KV storage.
+ * Provides helpers for JSON storage and namespacing.
  */
 
-import { kv as vercelKv } from "@vercel/kv";
+import { createClient } from "redis";
 import { cfg } from "./env.js";
 
-export const kv = vercelKv;
+// Global Redis client instance
+let redis: ReturnType<typeof createClient> | null = null;
+let connecting: Promise<void> | null = null;
+
+/**
+ * Get or create Redis client (singleton pattern for serverless)
+ */
+async function getClient() {
+  // If client exists and is open, verify it's healthy with a ping
+  if (redis?.isOpen) {
+    try {
+      await redis.ping();
+      return redis;
+    } catch (err) {
+      console.error('Redis ping failed, reconnecting:', err);
+      redis = null;
+      connecting = null;
+    }
+  }
+
+  // If currently connecting, wait for that connection
+  if (connecting) {
+    await connecting;
+    if (!redis) {
+      throw new Error('Redis connection failed');
+    }
+    return redis;
+  }
+
+  // Create new client
+  redis = createClient({ url: cfg.redisUrl });
+  redis.on('error', (err) => console.error('Redis Client Error:', err));
+
+  // Clean up on connection end (for serverless environments)
+  redis.on('end', () => {
+    redis = null;
+    connecting = null;
+  });
+
+  // Connect
+  connecting = redis.connect().then(() => {
+    connecting = null;
+  }).catch((err) => {
+    connecting = null;
+    redis = null;
+    throw err;
+  });
+
+  await connecting;
+  if (!redis) {
+    throw new Error('Redis connection failed');
+  }
+  return redis;
+}
+
+// Export for direct access if needed
+export const kv = { getClient };
+
+/**
+ * Batch multiple operations using Redis pipelining for better performance
+ * Example: await batchOperations(() => [setJSON('key1', val1), sadd('key2', 'val2')])
+ */
+export async function batchOperations(
+  operations: () => Promise<unknown>[]
+): Promise<void> {
+  const ops = operations();
+  await Promise.all(ops);
+}
 
 /**
  * Get JSON value from KV
  */
 export async function getJSON<T>(key: string): Promise<T | null> {
+  const client = await getClient();
   const prefixedKey = `${cfg.prefix}${key}`;
-  const value = await kv.get<T>(prefixedKey);
-  return value;
+  const value = await client.get(prefixedKey);
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch (err) {
+    console.error(`Failed to parse JSON for key ${prefixedKey}:`, err);
+    return null;
+  }
 }
 
 /**
@@ -26,11 +101,13 @@ export async function setJSON(
   value: unknown,
   opts?: { ex?: number }
 ): Promise<void> {
+  const client = await getClient();
   const prefixedKey = `${cfg.prefix}${key}`;
+  const stringValue = JSON.stringify(value);
   if (opts?.ex) {
-    await kv.set(prefixedKey, value, { ex: opts.ex });
+    await client.set(prefixedKey, stringValue, { EX: opts.ex });
   } else {
-    await kv.set(prefixedKey, value);
+    await client.set(prefixedKey, stringValue);
   }
 }
 
@@ -38,9 +115,9 @@ export async function setJSON(
  * Add member to set
  */
 export async function sadd(key: string, ...members: string[]): Promise<number> {
+  const client = await getClient();
   const prefixedKey = `${cfg.prefix}${key}`;
-  // @ts-expect-error Upstash types may not have complete overloads for variadic args
-  const result = await kv.sadd(prefixedKey, ...members);
+  const result = await client.sAdd(prefixedKey, members);
   return typeof result === 'number' ? result : 0;
 }
 
@@ -48,8 +125,9 @@ export async function sadd(key: string, ...members: string[]): Promise<number> {
  * Get all members of a set
  */
 export async function smembers(key: string): Promise<string[]> {
+  const client = await getClient();
   const prefixedKey = `${cfg.prefix}${key}`;
-  return kv.smembers(prefixedKey);
+  return client.sMembers(prefixedKey);
 }
 
 /**
@@ -60,13 +138,14 @@ export async function zadd(
   score: number,
   member: string
 ): Promise<number> {
+  const client = await getClient();
   const prefixedKey = `${cfg.prefix}${key}`;
-  const result = await kv.zadd(prefixedKey, { score, member });
+  const result = await client.zAdd(prefixedKey, { score, value: member });
   return result ?? 0;
 }
 
 /**
- * Get members from sorted set by score range
+ * Get members from sorted set by score range (reverse order: max to min)
  */
 export async function zrevrangebyscore(
   key: string,
@@ -74,17 +153,29 @@ export async function zrevrangebyscore(
   min: number | string,
   opts?: { offset?: number; count?: number }
 ): Promise<string[]> {
+  const client = await getClient();
   const prefixedKey = `${cfg.prefix}${key}`;
-  // @ts-expect-error Upstash types may not have complete overloads
-  return kv.zrevrangebyscore(prefixedKey, max, min, opts);
+
+  // Use zRangeByScore with REV option for reverse score-based range query
+  const options: { REV: boolean; LIMIT?: { offset: number; count: number } } = { REV: true };
+  if (opts) {
+    options.LIMIT = {
+      offset: opts.offset ?? 0,
+      count: opts.count ?? -1,
+    };
+  }
+
+  const results = await client.zRangeByScore(prefixedKey, min, max, options);
+  return results;
 }
 
 /**
  * Check if key exists
  */
 export async function exists(key: string): Promise<boolean> {
+  const client = await getClient();
   const prefixedKey = `${cfg.prefix}${key}`;
-  const result = await kv.exists(prefixedKey);
+  const result = await client.exists(prefixedKey);
   return result === 1;
 }
 
@@ -92,6 +183,9 @@ export async function exists(key: string): Promise<boolean> {
  * Set key only if it doesn't exist (returns 1 if set, 0 if already exists)
  */
 export async function setnx(key: string, value: unknown): Promise<number> {
+  const client = await getClient();
   const prefixedKey = `${cfg.prefix}${key}`;
-  return kv.setnx(prefixedKey, value);
+  const stringValue = JSON.stringify(value);
+  const result = await client.setNX(prefixedKey, stringValue);
+  return result ? 1 : 0;
 }

@@ -18,9 +18,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Test KV connectivity
+    const client = await kv.getClient();
     const testKey = "health:ts";
-    await kv.set(testKey, Date.now(), { ex: 5 });
-    await kv.del(testKey);
+    await client.set(testKey, Date.now().toString(), { EX: 5 });
+    await client.del(testKey);
 
     const duration = Date.now() - start;
     logRequest("GET", "/api/health", 200, duration);

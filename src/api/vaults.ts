@@ -6,8 +6,7 @@
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { z } from "zod";
-import { kv } from "../lib/kv.js";
-import { smembers } from "../lib/kv.js";
+import { smembers, getJSON } from "../lib/kv.js";
 import { json, error } from "../lib/http.js";
 import { kAuthorityVaults, kVaultJson } from "../lib/keys.js";
 import { createEtag } from "../lib/etag.js";
@@ -43,7 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Fetch all vaults in parallel
     const pipeline = pdas.map(async (pda) => {
       const key = kVaultJson(pda);
-      return kv.get<VaultDTO>(`${cfg.prefix}${key}`);
+      return getJSON<VaultDTO>(key);
     });
 
     const vaults = (await Promise.all(pipeline)).filter(
