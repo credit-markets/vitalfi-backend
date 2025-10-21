@@ -1,0 +1,103 @@
+/**
+ * Normalization Helpers
+ *
+ * Convert decoded Anchor accounts to compact DTOs for storage.
+ */
+
+import type { DecodedVault, DecodedPosition } from "./anchor.js";
+import type { VaultDTO, PositionDTO, ActivityDTO, VaultStatus, ActivityType } from "../types/dto.js";
+
+/**
+ * Map Anchor vault status enum to DTO string
+ */
+function mapVaultStatus(status: DecodedVault["status"]): VaultStatus {
+  if ("funding" in status) return "Funding";
+  if ("active" in status) return "Active";
+  if ("canceled" in status) return "Canceled";
+  if ("matured" in status) return "Matured";
+  return "Funding"; // Default fallback
+}
+
+/**
+ * Convert decoded Vault to DTO
+ */
+export function toVaultDTO(
+  pda: string,
+  decoded: DecodedVault,
+  slot: number,
+  blockTime?: number | null
+): VaultDTO {
+  return {
+    vaultPda: pda,
+    authority: decoded.authority.toBase58(),
+    vaultId: decoded.vaultId.toString(),
+    assetMint: decoded.assetMint.toBase58(),
+    status: mapVaultStatus(decoded.status),
+    cap: decoded.cap.toString(),
+    totalDeposited: decoded.totalDeposited.toString(),
+    fundingEndTs: decoded.fundingEndTs.toString(),
+    maturityTs: decoded.maturityTs.toString(),
+    slot,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Convert decoded Position to DTO
+ */
+export function toPositionDTO(
+  pda: string,
+  decoded: DecodedPosition,
+  slot: number,
+  blockTime?: number | null
+): PositionDTO {
+  return {
+    positionPda: pda,
+    vaultPda: decoded.vault.toBase58(),
+    owner: decoded.owner.toBase58(),
+    deposited: decoded.deposited.toString(),
+    claimed: decoded.claimed.toString(),
+    slot,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Convert action and context to ActivityDTO
+ */
+export function toActivityDTO(
+  action: string,
+  context: {
+    txSig: string;
+    slot: number;
+    blockTime: number | null;
+    vaultPda?: string;
+    positionPda?: string;
+    authority?: string;
+    owner?: string;
+    amount?: string;
+    assetMint?: string;
+  }
+): ActivityDTO {
+  // Map action names to ActivityType
+  let type: ActivityType = "vault_created";
+  if (action === "deposit") type = "deposit";
+  else if (action === "claim") type = "claim";
+  else if (action === "finalizeFunding") type = "funding_finalized";
+  else if (action === "matureVault") type = "matured";
+  else if (action === "initializeVault") type = "vault_created";
+
+  return {
+    id: `${context.txSig}:${type}:${context.slot}`,
+    txSig: context.txSig,
+    slot: context.slot,
+    blockTime: context.blockTime ? new Date(context.blockTime * 1000).toISOString() : null,
+    type,
+    vaultPda: context.vaultPda || null,
+    positionPda: context.positionPda || null,
+    authority: context.authority || null,
+    owner: context.owner || null,
+    amount: context.amount || null,
+    assetMint: context.assetMint || null,
+  };
+}
