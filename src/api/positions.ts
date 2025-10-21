@@ -6,8 +6,7 @@
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { z } from "zod";
-import { kv } from "../lib/kv.js";
-import { smembers } from "../lib/kv.js";
+import { smembers, getJSON } from "../lib/kv.js";
 import { json, error } from "../lib/http.js";
 import { kOwnerPositions, kPositionJson } from "../lib/keys.js";
 import { createEtag } from "../lib/etag.js";
@@ -42,7 +41,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Fetch all positions in parallel
     const pipeline = pdas.map(async (pda) => {
       const key = kPositionJson(pda);
-      return kv.get<PositionDTO>(`${cfg.prefix}${key}`);
+      return getJSON<PositionDTO>(key);
     });
 
     const positions = (await Promise.all(pipeline)).filter(

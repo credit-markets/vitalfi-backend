@@ -14,10 +14,6 @@ function getEnv(key: string, required = true): string {
 }
 
 export const cfg = {
-  // Vercel KV
-  kvUrl: getEnv("KV_REST_API_URL"),
-  kvToken: getEnv("KV_REST_API_TOKEN"),
-
   // Helius
   heliusSecret: getEnv("HELIUS_WEBHOOK_SECRET"),
   heliusApiKey: getEnv("HELIUS_API_KEY"),

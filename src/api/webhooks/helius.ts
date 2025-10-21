@@ -57,8 +57,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Read raw body for HMAC verification
     const rawBody = await getRawBody(req);
 
-    // Verify token query param
-    const token = req.query.token as string | undefined;
+    // Verify token from query param OR authentication header
+    const token = (req.query.token as string | undefined) ||
+                  (req.headers.authorization as string | undefined) ||
+                  (req.headers["authentication"] as string | undefined);
+
     if (token !== cfg.heliusSecret) {
       errorLog("Invalid token in webhook request");
       return error(res, 401, "Invalid token");

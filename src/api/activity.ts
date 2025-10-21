@@ -7,10 +7,9 @@
 
 import type { VercelRequest, VercelResponse} from "@vercel/node";
 import { z } from "zod";
-import { kv } from "../lib/kv.js";
-import { zrevrangebyscore } from "../lib/kv.js";
+import { zrevrangebyscore, getJSON } from "../lib/kv.js";
 import { json, error } from "../lib/http.js";
-import { kVaultActivity, kOwnerActivity, kActivity } from "../lib/keys.js";
+import { kVaultActivity, kOwnerActivity } from "../lib/keys.js";
 import { createEtag } from "../lib/etag.js";
 import { parseCursor, nextCursorFromLastItem } from "../lib/pagination.js";
 import { cfg } from "../lib/env.js";
@@ -61,7 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Fetch activity JSONs in parallel
     const pipeline = idsToFetch.map(async (id) => {
-      return kv.get<ActivityDTO>(`${cfg.prefix}${id}`);
+      return getJSON<ActivityDTO>(id);
     });
 
     const activities = (await Promise.all(pipeline)).filter(
