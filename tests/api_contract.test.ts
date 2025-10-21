@@ -16,6 +16,8 @@ describe("API response shapes", () => {
       cap: "1000",
       totalDeposited: "500",
       totalClaimed: "0",
+      targetApyBps: 500,
+      minDeposit: "100",
       fundingEndTs: "1234567890",
       maturityTs: "1234567890",
       slot: 123,

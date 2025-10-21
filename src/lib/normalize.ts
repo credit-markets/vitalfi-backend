@@ -39,6 +39,8 @@ export function toVaultDTO(
     cap: decoded.cap.toString(),
     totalDeposited: decoded.totalDeposited.toString(),
     totalClaimed: decoded.totalClaimed.toString(),
+    targetApyBps: decoded.targetApyBps,
+    minDeposit: decoded.minDeposit.toString(),
     fundingEndTs: decoded.fundingEndTs.toString(),
     maturityTs: decoded.maturityTs.toString(),
     slot,

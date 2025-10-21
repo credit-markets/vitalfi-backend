@@ -16,6 +16,8 @@ export type VaultDTO = {
   cap: string | null;
   totalDeposited: string | null;
   totalClaimed: string | null;
+  targetApyBps: number | null;
+  minDeposit: string | null;
   fundingEndTs: string | null;
   maturityTs: string | null;
   slot: number | null;
