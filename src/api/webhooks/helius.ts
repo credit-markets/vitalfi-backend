@@ -148,6 +148,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let vaultsProcessed = 0;
     let positionsProcessed = 0;
 
+    // Store old account states for amount delta calculation
+    const oldVaults = new Map<string, import("../../types/dto.js").VaultDTO>();
+    const oldPositions = new Map<string, import("../../types/dto.js").PositionDTO>();
+
     // Process each decoded account with batch operations for better performance
     const accountOperations: Promise<unknown>[] = [];
 
@@ -156,8 +160,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const vaultData = item.data as import("../../lib/anchor.js").DecodedVault;
         const dto = toVaultDTO(item.pda, vaultData, payload.slot, payload.blockTime);
 
-        // Check if vault exists to detect status changes
+        // Check if vault exists to detect status changes and store for amount calculation
         const existingVault = await getJSON<import("../../types/dto.js").VaultDTO>(kVaultJson(item.pda));
+        if (existingVault) {
+          oldVaults.set(item.pda, existingVault);
+        }
 
         // Batch all vault operations including ZSET for ordering
         // Also write to per-status ZSET for efficient filtered queries
@@ -170,7 +177,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ];
 
         // If status changed, remove from old per-status ZSET to prevent stale entries
-        if (existingVault && existingVault.status !== dto.status) {
+        const statusChanged = existingVault && existingVault.status !== dto.status;
+        if (statusChanged) {
           vaultOps.push(
             zrem(kAuthorityVaultsByUpdated(dto.authority, existingVault.status), item.pda)
           );
@@ -181,6 +189,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } else if (item.type === "position") {
         const positionData = item.data as import("../../lib/anchor.js").DecodedPosition;
         const dto = toPositionDTO(item.pda, positionData, payload.slot, payload.blockTime);
+
+        // Store old position for amount calculation
+        const existingPosition = await getJSON<import("../../types/dto.js").PositionDTO>(kPositionJson(item.pda));
+        if (existingPosition) {
+          oldPositions.set(item.pda, existingPosition);
+        }
 
         // Batch all position operations including ZSET for ordering
         accountOperations.push(
@@ -207,6 +221,71 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const vaultItem = decoded.find((d) => d.type === "vault");
       const positionItem = decoded.find((d) => d.type === "position");
 
+      // Extract amount from account deltas
+      let amount: string | undefined;
+      let assetMint: string | undefined;
+
+      if (vaultItem?.type === "vault") {
+        const newVault = vaultItem.data as import("../../lib/anchor.js").DecodedVault;
+        assetMint = newVault.assetMint.toBase58();
+
+        const oldVault = oldVaults.get(vaultItem.pda);
+
+        if (oldVault) {
+          // Calculate delta based on action type
+          if (action === "deposit" || action === "initializeVault") {
+            const oldDeposited = BigInt(oldVault.totalDeposited || "0");
+            const newDeposited = newVault.totalDeposited;
+            const delta = newDeposited - oldDeposited;
+            if (delta > 0n) {
+              amount = delta.toString();
+            }
+          } else if (action === "claim") {
+            const oldClaimed = BigInt(oldVault.totalClaimed || "0");
+            const newClaimed = newVault.totalClaimed;
+            const delta = newClaimed - oldClaimed;
+            if (delta > 0n) {
+              amount = delta.toString();
+            }
+          }
+        } else {
+          // No previous state - use total for initialization
+          if (action === "initializeVault" && newVault.totalDeposited > 0n) {
+            amount = newVault.totalDeposited.toString();
+          }
+        }
+      }
+
+      if (positionItem?.type === "position") {
+        const newPosition = positionItem.data as import("../../lib/anchor.js").DecodedPosition;
+
+        const oldPosition = oldPositions.get(positionItem.pda);
+
+        if (oldPosition) {
+          // Calculate delta based on action type
+          if (action === "deposit") {
+            const oldDeposited = BigInt(oldPosition.deposited || "0");
+            const newDeposited = newPosition.deposited;
+            const delta = newDeposited - oldDeposited;
+            if (delta > 0n) {
+              amount = delta.toString();
+            }
+          } else if (action === "claim") {
+            const oldClaimed = BigInt(oldPosition.claimed || "0");
+            const newClaimed = newPosition.claimed;
+            const delta = newClaimed - oldClaimed;
+            if (delta > 0n) {
+              amount = delta.toString();
+            }
+          }
+        } else {
+          // No previous state - use total for first deposit
+          if (action === "deposit" && newPosition.deposited > 0n) {
+            amount = newPosition.deposited.toString();
+          }
+        }
+      }
+
       const activityDto = toActivityDTO(action, {
         txSig: payload.signature,
         slot: payload.slot,
@@ -215,7 +294,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         positionPda: positionItem?.pda,
         authority: vaultItem?.type === "vault" ? (vaultItem.data as import("../../lib/anchor.js").DecodedVault).authority.toBase58() : undefined,
         owner: positionItem?.type === "position" ? (positionItem.data as import("../../lib/anchor.js").DecodedPosition).owner.toBase58() : undefined,
-        // TODO: Extract amount from logs if available
+        amount,
+        assetMint,
       });
 
       const activityKey = kActivity(payload.signature, activityDto.type, payload.slot);

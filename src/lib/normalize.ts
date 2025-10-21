@@ -38,6 +38,7 @@ export function toVaultDTO(
     status: mapVaultStatus(decoded.status),
     cap: decoded.cap.toString(),
     totalDeposited: decoded.totalDeposited.toString(),
+    totalClaimed: decoded.totalClaimed.toString(),
     fundingEndTs: decoded.fundingEndTs.toString(),
     maturityTs: decoded.maturityTs.toString(),
     slot,

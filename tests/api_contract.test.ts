@@ -15,6 +15,7 @@ describe("API response shapes", () => {
       status: "Funding",
       cap: "1000",
       totalDeposited: "500",
+      totalClaimed: "0",
       fundingEndTs: "1234567890",
       maturityTs: "1234567890",
       slot: 123,
