@@ -36,8 +36,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { owner, cursor, limit } = parsed.data;
 
-    // Try ZSET-based query first (more efficient with cursor)
-    const maxScore = cursor ?? Number.POSITIVE_INFINITY;
+    // Use exclusive cursor to prevent duplicate items across pages
+    const maxScore = cursor ? cursor - 1 : Number.POSITIVE_INFINITY;
     let pdas: string[];
 
     try {

@@ -145,11 +145,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const dto = toVaultDTO(item.pda, vaultData, payload.slot, payload.blockTime);
 
         // Batch all vault operations including ZSET for ordering
+        // Also write to per-status ZSET for efficient filtered queries
         accountOperations.push(
           setJSON(kVaultJson(item.pda), dto),
           sadd(kVaultsSet(), item.pda),
           sadd(kAuthorityVaults(dto.authority), item.pda),
-          zadd(kAuthorityVaultsByUpdated(dto.authority), dto.updatedAtEpoch, item.pda)
+          zadd(kAuthorityVaultsByUpdated(dto.authority), dto.updatedAtEpoch, item.pda),
+          zadd(kAuthorityVaultsByUpdated(dto.authority, dto.status), dto.updatedAtEpoch, item.pda)
         );
 
         vaultsProcessed++;
@@ -195,25 +197,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const activityKey = kActivity(payload.signature, activityDto.type, payload.slot);
 
-      // Use SETNX for idempotent writes (dedupe on retries)
-      const wasNew = await setnx(activityKey, activityDto);
+      // Use SETNX for idempotent writes with 30-day TTL to prevent unbounded growth
+      const TTL_30_DAYS = 30 * 24 * 3600;
+      const wasNew = await setnx(activityKey, activityDto, { ex: TTL_30_DAYS });
 
       if (wasNew === 1) {
         // Only add to ZSETs if this is a new activity
         // Use blockTimeEpoch for score (fallback to slot if null)
         const score = activityDto.blockTimeEpoch || payload.slot;
 
-        // Add to vault activity ZSET
-        if (activityDto.vaultPda) {
-          await zadd(kVaultActivity(activityDto.vaultPda), score, activityKey);
-        }
+        try {
+          // Add to ZSETs with proper error handling to maintain consistency
+          const zsetOps: Promise<unknown>[] = [];
 
-        // Add to owner activity ZSET
-        if (activityDto.owner) {
-          await zadd(kOwnerActivity(activityDto.owner), score, activityKey);
-        }
+          if (activityDto.vaultPda) {
+            zsetOps.push(zadd(kVaultActivity(activityDto.vaultPda), score, activityKey));
+          }
 
-        activitiesProcessed++;
+          if (activityDto.owner) {
+            zsetOps.push(zadd(kOwnerActivity(activityDto.owner), score, activityKey));
+          }
+
+          // Execute all ZSET operations in parallel
+          await Promise.all(zsetOps);
+          activitiesProcessed++;
+        } catch (err) {
+          errorLog("Failed to index activity in ZSETs", { activityKey, err });
+          // Activity was created but not fully indexed - this will be caught in monitoring
+          // Don't re-throw to avoid failing the entire webhook
+        }
       }
     }
 

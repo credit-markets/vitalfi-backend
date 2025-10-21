@@ -37,20 +37,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { authority, status, cursor, limit } = parsed.data;
 
-    // Try ZSET-based query first (more efficient with cursor)
-    const maxScore = cursor ?? Number.POSITIVE_INFINITY;
+    // Use exclusive cursor to prevent duplicate items across pages
+    // If cursor is provided, we want items with updatedAtEpoch < cursor (strictly less than)
+    const maxScore = cursor ? cursor - 1 : Number.POSITIVE_INFINITY;
     let pdas: string[];
+
+    // Use per-status ZSET for filtered queries, or all vaults ZSET
+    const zsetKey = status
+      ? kAuthorityVaultsByUpdated(authority, status)
+      : kAuthorityVaultsByUpdated(authority);
 
     try {
       // Fetch limit + 1 to determine if there are more results
       pdas = await zrevrangebyscore(
-        kAuthorityVaultsByUpdated(authority),
+        zsetKey,
         maxScore,
         0,
         { offset: 0, count: limit + 1 }
       );
     } catch (err) {
-      // Fallback to SET if ZSET doesn't exist yet
+      // Fallback to SET if ZSET doesn't exist yet (with client-side filtering)
       pdas = await smembers(kAuthorityVaults(authority));
     }
 
@@ -64,10 +70,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       (v): v is VaultDTO => v !== null
     );
 
-    // Filter by status if provided
-    const filtered = status
-      ? vaults.filter((v) => v.status === status)
-      : vaults;
+    // Only filter by status if using fallback SET (ZSET already filtered)
+    const filtered = (pdas.length > 0 && !status)
+      ? vaults
+      : status
+        ? vaults.filter((v) => v.status === status)
+        : vaults;
 
     // Sort by updatedAtEpoch DESC (most recent first)
     filtered.sort((a, b) => b.updatedAtEpoch - a.updatedAtEpoch);

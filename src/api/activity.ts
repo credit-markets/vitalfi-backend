@@ -11,7 +11,6 @@ import { zrevrangebyscore, getJSON } from "../lib/kv.js";
 import { json, error } from "../lib/http.js";
 import { kVaultActivity, kOwnerActivity } from "../lib/keys.js";
 import { createEtag } from "../lib/etag.js";
-import { parseCursor, nextCursorFromLastItem } from "../lib/pagination.js";
 import { cfg } from "../lib/env.js";
 import { logRequest } from "../lib/logger.js";
 import type { ActivityDTO } from "../types/dto.js";
@@ -44,8 +43,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Choose ZSET key
     const zsetKey = vault ? kVaultActivity(vault) : kOwnerActivity(owner!);
 
-    // Use cursor as max score (Unix epoch seconds)
-    const maxScore = cursor ?? Number.POSITIVE_INFINITY;
+    // Use exclusive cursor to prevent duplicate items across pages
+    const maxScore = cursor ? cursor - 1 : Number.POSITIVE_INFINITY;
 
     // Fetch activity IDs from ZSET (reverse chronological order)
     // Fetch limit+1 to detect if there are more items

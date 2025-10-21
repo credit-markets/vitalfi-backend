@@ -181,11 +181,26 @@ export async function exists(key: string): Promise<boolean> {
 
 /**
  * Set key only if it doesn't exist (returns 1 if set, 0 if already exists)
+ * Supports optional TTL in seconds
  */
-export async function setnx(key: string, value: unknown): Promise<number> {
+export async function setnx(
+  key: string,
+  value: unknown,
+  opts?: { ex?: number }
+): Promise<number> {
   const client = await getClient();
   const prefixedKey = `${cfg.prefix}${key}`;
   const stringValue = JSON.stringify(value);
-  const result = await client.setNX(prefixedKey, stringValue);
-  return result ? 1 : 0;
+
+  if (opts?.ex) {
+    // Use SET with NX and EX options for atomic operation
+    const result = await client.set(prefixedKey, stringValue, {
+      NX: true,
+      EX: opts.ex,
+    });
+    return result === "OK" ? 1 : 0;
+  } else {
+    const result = await client.setNX(prefixedKey, stringValue);
+    return result ? 1 : 0;
+  }
 }
