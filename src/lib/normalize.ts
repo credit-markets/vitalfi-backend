@@ -27,6 +27,9 @@ export function toVaultDTO(
   slot: number,
   blockTime?: number | null
 ): VaultDTO {
+  const now = Date.now();
+  const updatedAtEpoch = blockTime || Math.floor(now / 1000);
+  
   return {
     vaultPda: pda,
     authority: decoded.authority.toBase58(),
@@ -38,7 +41,8 @@ export function toVaultDTO(
     fundingEndTs: decoded.fundingEndTs.toString(),
     maturityTs: decoded.maturityTs.toString(),
     slot,
-    updatedAt: new Date().toISOString(),
+    updatedAt: new Date(updatedAtEpoch * 1000).toISOString(),
+    updatedAtEpoch,
   };
 }
 
@@ -51,6 +55,9 @@ export function toPositionDTO(
   slot: number,
   blockTime?: number | null
 ): PositionDTO {
+  const now = Date.now();
+  const updatedAtEpoch = blockTime || Math.floor(now / 1000);
+  
   return {
     positionPda: pda,
     vaultPda: decoded.vault.toBase58(),
@@ -58,7 +65,8 @@ export function toPositionDTO(
     deposited: decoded.deposited.toString(),
     claimed: decoded.claimed.toString(),
     slot,
-    updatedAt: new Date().toISOString(),
+    updatedAt: new Date(updatedAtEpoch * 1000).toISOString(),
+    updatedAtEpoch,
   };
 }
 
@@ -87,11 +95,14 @@ export function toActivityDTO(
   else if (action === "matureVault") type = "matured";
   else if (action === "initializeVault") type = "vault_created";
 
+  const blockTimeEpoch = context.blockTime;
+
   return {
     id: `${context.txSig}:${type}:${context.slot}`,
     txSig: context.txSig,
     slot: context.slot,
-    blockTime: context.blockTime ? new Date(context.blockTime * 1000).toISOString() : null,
+    blockTime: blockTimeEpoch ? new Date(blockTimeEpoch * 1000).toISOString() : null,
+    blockTimeEpoch,
     type,
     vaultPda: context.vaultPda || null,
     positionPda: context.positionPda || null,

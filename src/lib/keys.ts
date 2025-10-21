@@ -34,6 +34,13 @@ export function kAuthorityVaults(authority: string): string {
 }
 
 /**
+ * Sorted set of vault PDAs for a given authority (sorted by updatedAtEpoch)
+ */
+export function kAuthorityVaultsByUpdated(authority: string): string {
+  return `authority:${authority}:vaults:by_updated`;
+}
+
+/**
  * Position JSON blob
  */
 export function kPositionJson(pda: string): string {
@@ -45,6 +52,13 @@ export function kPositionJson(pda: string): string {
  */
 export function kOwnerPositions(owner: string): string {
   return `owner:${owner}:positions`;
+}
+
+/**
+ * Sorted set of position PDAs for a given owner (sorted by updatedAtEpoch)
+ */
+export function kOwnerPositionsByUpdated(owner: string): string {
+  return `owner:${owner}:positions:by_updated`;
 }
 
 /**

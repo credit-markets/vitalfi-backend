@@ -6,9 +6,9 @@
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { z } from "zod";
-import { smembers, getJSON } from "../lib/kv.js";
+import { smembers, getJSON, zrevrangebyscore } from "../lib/kv.js";
 import { json, error } from "../lib/http.js";
-import { kAuthorityVaults, kVaultJson } from "../lib/keys.js";
+import { kAuthorityVaults, kAuthorityVaultsByUpdated, kVaultJson } from "../lib/keys.js";
 import { createEtag } from "../lib/etag.js";
 import { cfg } from "../lib/env.js";
 import { logRequest } from "../lib/logger.js";
@@ -17,6 +17,7 @@ import type { VaultDTO } from "../types/dto.js";
 const QuerySchema = z.object({
   authority: z.string().min(32).max(44),
   status: z.enum(["Funding", "Active", "Matured", "Canceled"]).optional(),
+  cursor: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().min(1).max(100).default(50),
 });
 
@@ -34,10 +35,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return error(res, 400, "Invalid query parameters", parsed.error.issues);
     }
 
-    const { authority, status, limit } = parsed.data;
+    const { authority, status, cursor, limit } = parsed.data;
 
-    // Get vault PDAs for authority
-    const pdas = await smembers(kAuthorityVaults(authority));
+    // Try ZSET-based query first (more efficient with cursor)
+    const maxScore = cursor ?? Number.POSITIVE_INFINITY;
+    let pdas: string[];
+
+    try {
+      // Fetch limit + 1 to determine if there are more results
+      pdas = await zrevrangebyscore(
+        kAuthorityVaultsByUpdated(authority),
+        maxScore,
+        0,
+        { offset: 0, count: limit + 1 }
+      );
+    } catch (err) {
+      // Fallback to SET if ZSET doesn't exist yet
+      pdas = await smembers(kAuthorityVaults(authority));
+    }
 
     // Fetch all vaults in parallel
     const pipeline = pdas.map(async (pda) => {
@@ -54,16 +69,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? vaults.filter((v) => v.status === status)
       : vaults;
 
-    // Sort by slot DESC (most recent first)
-    filtered.sort((a, b) => (b.slot || 0) - (a.slot || 0));
+    // Sort by updatedAtEpoch DESC (most recent first)
+    filtered.sort((a, b) => b.updatedAtEpoch - a.updatedAtEpoch);
 
-    // Paginate
+    // Check if there are more results
+    const hasMore = filtered.length > limit;
     const items = filtered.slice(0, limit);
+    const nextCursor = hasMore && items.length > 0
+      ? items[items.length - 1].updatedAtEpoch
+      : null;
 
     const body = {
       items,
-      nextCursor: null,
-      total: filtered.length,
+      nextCursor,
+      total: hasMore ? null : filtered.length, // Don't compute total if paginated
     };
 
     const etag = createEtag(body);

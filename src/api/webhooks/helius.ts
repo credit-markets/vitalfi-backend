@@ -17,8 +17,10 @@ import {
   kVaultJson,
   kVaultsSet,
   kAuthorityVaults,
+  kAuthorityVaultsByUpdated,
   kPositionJson,
   kOwnerPositions,
+  kOwnerPositionsByUpdated,
   kVaultActivity,
   kOwnerActivity,
   kActivity,
@@ -142,11 +144,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const vaultData = item.data as import("../../lib/anchor.js").DecodedVault;
         const dto = toVaultDTO(item.pda, vaultData, payload.slot, payload.blockTime);
 
-        // Batch all vault operations
+        // Batch all vault operations including ZSET for ordering
         accountOperations.push(
           setJSON(kVaultJson(item.pda), dto),
           sadd(kVaultsSet(), item.pda),
-          sadd(kAuthorityVaults(dto.authority), item.pda)
+          sadd(kAuthorityVaults(dto.authority), item.pda),
+          zadd(kAuthorityVaultsByUpdated(dto.authority), dto.updatedAtEpoch, item.pda)
         );
 
         vaultsProcessed++;
@@ -154,10 +157,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const positionData = item.data as import("../../lib/anchor.js").DecodedPosition;
         const dto = toPositionDTO(item.pda, positionData, payload.slot, payload.blockTime);
 
-        // Batch all position operations
+        // Batch all position operations including ZSET for ordering
         accountOperations.push(
           setJSON(kPositionJson(item.pda), dto),
-          sadd(kOwnerPositions(dto.owner), item.pda)
+          sadd(kOwnerPositions(dto.owner), item.pda),
+          zadd(kOwnerPositionsByUpdated(dto.owner), dto.updatedAtEpoch, item.pda)
         );
 
         positionsProcessed++;
@@ -196,7 +200,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (wasNew === 1) {
         // Only add to ZSETs if this is a new activity
-        const score = payload.blockTime || payload.slot; // Fallback to slot if blockTime null
+        // Use blockTimeEpoch for score (fallback to slot if null)
+        const score = activityDto.blockTimeEpoch || payload.slot;
 
         // Add to vault activity ZSET
         if (activityDto.vaultPda) {

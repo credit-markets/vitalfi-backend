@@ -6,9 +6,9 @@
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { z } from "zod";
-import { smembers, getJSON } from "../lib/kv.js";
+import { smembers, getJSON, zrevrangebyscore } from "../lib/kv.js";
 import { json, error } from "../lib/http.js";
-import { kOwnerPositions, kPositionJson } from "../lib/keys.js";
+import { kOwnerPositions, kOwnerPositionsByUpdated, kPositionJson } from "../lib/keys.js";
 import { createEtag } from "../lib/etag.js";
 import { cfg } from "../lib/env.js";
 import { logRequest } from "../lib/logger.js";
@@ -16,6 +16,7 @@ import type { PositionDTO } from "../types/dto.js";
 
 const QuerySchema = z.object({
   owner: z.string().min(32).max(44),
+  cursor: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().min(1).max(100).default(50),
 });
 
@@ -33,10 +34,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return error(res, 400, "Invalid query parameters", parsed.error.issues);
     }
 
-    const { owner, limit } = parsed.data;
+    const { owner, cursor, limit } = parsed.data;
 
-    // Get position PDAs for owner
-    const pdas = await smembers(kOwnerPositions(owner));
+    // Try ZSET-based query first (more efficient with cursor)
+    const maxScore = cursor ?? Number.POSITIVE_INFINITY;
+    let pdas: string[];
+
+    try {
+      // Fetch limit + 1 to determine if there are more results
+      pdas = await zrevrangebyscore(
+        kOwnerPositionsByUpdated(owner),
+        maxScore,
+        0,
+        { offset: 0, count: limit + 1 }
+      );
+    } catch (err) {
+      // Fallback to SET if ZSET doesn't exist yet
+      pdas = await smembers(kOwnerPositions(owner));
+    }
 
     // Fetch all positions in parallel
     const pipeline = pdas.map(async (pda) => {
@@ -48,16 +63,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       (p): p is PositionDTO => p !== null
     );
 
-    // Sort by slot DESC (most recent first)
-    positions.sort((a, b) => (b.slot || 0) - (a.slot || 0));
+    // Sort by updatedAtEpoch DESC (most recent first)
+    positions.sort((a, b) => b.updatedAtEpoch - a.updatedAtEpoch);
 
-    // Paginate
+    // Check if there are more results
+    const hasMore = positions.length > limit;
     const items = positions.slice(0, limit);
+    const nextCursor = hasMore && items.length > 0
+      ? items[items.length - 1].updatedAtEpoch
+      : null;
 
     const body = {
       items,
-      nextCursor: null,
-      total: positions.length,
+      nextCursor,
+      total: hasMore ? null : positions.length, // Don't compute total if paginated
     };
 
     const etag = createEtag(body);

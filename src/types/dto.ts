@@ -19,6 +19,7 @@ export type VaultDTO = {
   maturityTs: string | null;
   slot: number | null;
   updatedAt: string; // ISO 8601
+  updatedAtEpoch: number; // Unix epoch seconds for cursor pagination
 };
 
 export type PositionDTO = {
@@ -29,6 +30,7 @@ export type PositionDTO = {
   claimed: string | null;
   slot: number | null;
   updatedAt: string; // ISO 8601
+  updatedAtEpoch: number; // Unix epoch seconds for cursor pagination
 };
 
 export type ActivityType =
@@ -46,6 +48,7 @@ export type ActivityDTO = {
   txSig: string;
   slot: number;
   blockTime: string | null; // ISO 8601 or null
+  blockTimeEpoch: number | null; // Unix epoch seconds for ZSET scores
   type: ActivityType;
   vaultPda: string | null;
   positionPda: string | null;

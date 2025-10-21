@@ -19,7 +19,7 @@ import type { ActivityDTO } from "../types/dto.js";
 const QuerySchema = z.object({
   vault: z.string().min(32).max(44).optional(),
   owner: z.string().min(32).max(44).optional(),
-  cursor: z.string().optional(),
+  cursor: z.coerce.number().int().positive().optional(), // Unix epoch seconds
   limit: z.coerce.number().min(1).max(100).default(50),
 }).refine((data) => data.vault || data.owner, {
   message: "Either vault or owner must be provided",
@@ -44,12 +44,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Choose ZSET key
     const zsetKey = vault ? kVaultActivity(vault) : kOwnerActivity(owner!);
 
-    // Parse cursor (ISO timestamp → Unix epoch)
-    const maxScore = parseCursor(cursor);
+    // Use cursor as max score (Unix epoch seconds)
+    const maxScore = cursor ?? Number.POSITIVE_INFINITY;
 
     // Fetch activity IDs from ZSET (reverse chronological order)
     // Fetch limit+1 to detect if there are more items
-    const activityIds = await zrevrangebyscore(zsetKey, maxScore, "-inf", {
+    const activityIds = await zrevrangebyscore(zsetKey, maxScore, 0, {
       offset: 0,
       count: limit + 1,
     });
@@ -67,8 +67,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       (a): a is ActivityDTO => a !== null
     );
 
-    // Compute next cursor
-    const nextCursor = hasMore ? nextCursorFromLastItem(activities[activities.length - 1]) : null;
+    // Compute next cursor using blockTimeEpoch
+    const nextCursor = hasMore && activities.length > 0
+      ? activities[activities.length - 1].blockTimeEpoch
+      : null;
 
     const body = {
       items: activities,
