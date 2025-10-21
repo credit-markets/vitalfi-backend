@@ -11,11 +11,12 @@ import { json, error } from "../lib/http.js";
 import { kAuthorityVaults, kAuthorityVaultsByUpdated, kVaultJson } from "../lib/keys.js";
 import { createEtag } from "../lib/etag.js";
 import { cfg } from "../lib/env.js";
-import { logRequest } from "../lib/logger.js";
+import { logRequest, errorLog } from "../lib/logger.js";
+import { isValidPubkey } from "../lib/validation.js";
 import type { VaultDTO } from "../types/dto.js";
 
 const QuerySchema = z.object({
-  authority: z.string().min(32).max(44),
+  authority: z.string().min(32).max(44).refine(isValidPubkey, "Invalid Base58 public key"),
   status: z.enum(["Funding", "Active", "Matured", "Canceled"]).optional(),
   cursor: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().min(1).max(100).default(50),
@@ -61,9 +62,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Fallback to SET if ZSET doesn't exist yet (with client-side filtering)
       pdas = await smembers(kAuthorityVaults(authority));
 
+      // Hard limit to prevent memory issues with large SETs
+      const MAX_SET_SIZE = 1000;
+      if (pdas.length > MAX_SET_SIZE) {
+        errorLog(`SET too large for authority ${authority}`, { vaultCount: pdas.length, maxAllowed: MAX_SET_SIZE });
+        return error(res, 503, "Too many vaults - ZSET index not ready. Please retry in a few seconds.");
+      }
+
       // Log warning for large SET fallbacks
       if (pdas.length > 100) {
-        console.warn(`Large SET fallback for authority ${authority}: ${pdas.length} vaults`);
+        errorLog(`Large SET fallback for authority ${authority}`, { vaultCount: pdas.length, severity: "warning" });
       }
     }
 

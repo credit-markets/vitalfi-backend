@@ -7,6 +7,7 @@
 
 import { createClient } from "redis";
 import { cfg } from "./env.js";
+import { errorLog } from "./logger.js";
 
 // Global Redis client instance
 let redis: ReturnType<typeof createClient> | null = null;
@@ -22,7 +23,7 @@ async function getClient() {
       await redis.ping();
       return redis;
     } catch (err) {
-      console.error('Redis ping failed, reconnecting:', err);
+      errorLog('Redis ping failed, reconnecting', err);
       // Gracefully close the old connection to prevent socket leaks
       await redis.quit().catch(() => {});
       redis = null;
@@ -41,7 +42,7 @@ async function getClient() {
 
   // Create new client
   redis = createClient({ url: cfg.redisUrl });
-  redis.on('error', (err) => console.error('Redis Client Error:', err));
+  redis.on('error', (err) => errorLog('Redis Client Error', err));
 
   // Clean up on connection end (for serverless environments)
   redis.on('end', () => {
@@ -90,7 +91,7 @@ export async function getJSON<T>(key: string): Promise<T | null> {
   try {
     return JSON.parse(value) as T;
   } catch (err) {
-    console.error(`Failed to parse JSON for key ${prefixedKey}:`, err);
+    errorLog(`Failed to parse JSON for key ${prefixedKey}`, err);
     return null;
   }
 }

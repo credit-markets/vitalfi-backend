@@ -30,4 +30,5 @@ export const cfg = {
 
   // Storage
   prefix: getEnv("STORAGE_PREFIX", false) || "vitalfi:",
+  activityTtlDays: parseInt(getEnv("ACTIVITY_TTL_DAYS", false) || "30", 10),
 };

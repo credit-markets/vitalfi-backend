@@ -300,9 +300,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const activityKey = kActivity(payload.signature, activityDto.type, payload.slot);
 
-      // Use SETNX for idempotent writes with 30-day TTL to prevent unbounded growth
-      const TTL_30_DAYS = 30 * 24 * 3600;
-      const wasNew = await setnx(activityKey, activityDto, { ex: TTL_30_DAYS });
+      // Use SETNX for idempotent writes with configurable TTL to prevent unbounded growth
+      const activityTtlSeconds = cfg.activityTtlDays * 24 * 3600;
+      const wasNew = await setnx(activityKey, activityDto, { ex: activityTtlSeconds });
 
       if (wasNew === 1) {
         // Only add to ZSETs if this is a new activity

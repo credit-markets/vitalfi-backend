@@ -11,11 +11,12 @@ import { json, error } from "../lib/http.js";
 import { kOwnerPositions, kOwnerPositionsByUpdated, kPositionJson } from "../lib/keys.js";
 import { createEtag } from "../lib/etag.js";
 import { cfg } from "../lib/env.js";
-import { logRequest } from "../lib/logger.js";
+import { logRequest, errorLog } from "../lib/logger.js";
+import { isValidPubkey } from "../lib/validation.js";
 import type { PositionDTO } from "../types/dto.js";
 
 const QuerySchema = z.object({
-  owner: z.string().min(32).max(44),
+  owner: z.string().min(32).max(44).refine(isValidPubkey, "Invalid Base58 public key"),
   cursor: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().min(1).max(100).default(50),
 });
@@ -52,6 +53,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (err) {
       // Fallback to SET if ZSET doesn't exist yet
       pdas = await smembers(kOwnerPositions(owner));
+
+      // Hard limit to prevent memory issues with large SETs
+      const MAX_SET_SIZE = 1000;
+      if (pdas.length > MAX_SET_SIZE) {
+        errorLog(`SET too large for owner ${owner}`, { positionCount: pdas.length, maxAllowed: MAX_SET_SIZE });
+        return error(res, 503, "Too many positions - ZSET index not ready. Please retry in a few seconds.");
+      }
+
+      // Log warning for large SET fallbacks
+      if (pdas.length > 100) {
+        errorLog(`Large SET fallback for owner ${owner}`, { positionCount: pdas.length, severity: "warning" });
+      }
     }
 
     // Fetch all positions in parallel
