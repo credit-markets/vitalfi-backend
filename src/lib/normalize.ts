@@ -4,8 +4,23 @@
  * Convert decoded Anchor accounts to compact DTOs for storage.
  */
 
+import { PublicKey } from "@solana/web3.js";
 import type { DecodedVault, DecodedPosition } from "./anchor.js";
 import type { VaultDTO, PositionDTO, ActivityDTO, VaultStatus, ActivityType } from "../types/dto.js";
+import { cfg } from "./env.js";
+import { errorLog } from "./logger.js";
+
+/**
+ * Derive Vault Token Account PDA
+ * Seeds: ["vault_token", vault]
+ */
+function getVaultTokenAccount(vaultPda: string): string {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault_token"), new PublicKey(vaultPda).toBuffer()],
+    new PublicKey(cfg.programId)
+  );
+  return pda.toBase58();
+}
 
 /**
  * Map Anchor vault status enum to DTO string
@@ -27,18 +42,28 @@ export function toVaultDTO(
   slot: number,
   blockTime?: number | null
 ): VaultDTO {
+  const now = Date.now();
+  const updatedAtEpoch = blockTime || Math.floor(now / 1000);
+
   return {
     vaultPda: pda,
+    vaultTokenAccount: getVaultTokenAccount(pda),
     authority: decoded.authority.toBase58(),
     vaultId: decoded.vaultId.toString(),
     assetMint: decoded.assetMint.toBase58(),
     status: mapVaultStatus(decoded.status),
     cap: decoded.cap.toString(),
     totalDeposited: decoded.totalDeposited.toString(),
+    totalClaimed: decoded.totalClaimed.toString(),
+    targetApyBps: decoded.targetApyBps,
+    minDeposit: decoded.minDeposit.toString(),
     fundingEndTs: decoded.fundingEndTs.toString(),
     maturityTs: decoded.maturityTs.toString(),
+    payoutNum: decoded.payoutNum.toString(),
+    payoutDen: decoded.payoutDen.toString(),
     slot,
-    updatedAt: new Date().toISOString(),
+    updatedAt: new Date(updatedAtEpoch * 1000).toISOString(),
+    updatedAtEpoch,
   };
 }
 
@@ -51,6 +76,9 @@ export function toPositionDTO(
   slot: number,
   blockTime?: number | null
 ): PositionDTO {
+  const now = Date.now();
+  const updatedAtEpoch = blockTime || Math.floor(now / 1000);
+  
   return {
     positionPda: pda,
     vaultPda: decoded.vault.toBase58(),
@@ -58,9 +86,24 @@ export function toPositionDTO(
     deposited: decoded.deposited.toString(),
     claimed: decoded.claimed.toString(),
     slot,
-    updatedAt: new Date().toISOString(),
+    updatedAt: new Date(updatedAtEpoch * 1000).toISOString(),
+    updatedAtEpoch,
   };
 }
+
+/**
+ * Map Solana instruction names to ActivityType enum
+ */
+const ACTION_TYPE_MAP: Record<string, ActivityType> = {
+  initializeVault: "vault_created",
+  deposit: "deposit",
+  claim: "claim",
+  finalizeFunding: "funding_finalized",
+  matureVault: "matured",
+  cancelVault: "canceled",
+  authorityWithdraw: "authority_withdraw",
+  // Note: position_created is inferred when position appears in accounts
+};
 
 /**
  * Convert action and context to ActivityDTO
@@ -79,20 +122,23 @@ export function toActivityDTO(
     assetMint?: string;
   }
 ): ActivityDTO {
-  // Map action names to ActivityType
-  let type: ActivityType = "vault_created";
-  if (action === "deposit") type = "deposit";
-  else if (action === "claim") type = "claim";
-  else if (action === "finalizeFunding") type = "funding_finalized";
-  else if (action === "matureVault") type = "matured";
-  else if (action === "initializeVault") type = "vault_created";
+  // Map action names to ActivityType with fallback logging
+  const type = ACTION_TYPE_MAP[action];
+
+  if (!type) {
+    errorLog("Unknown action type in activity", { action, fallback: "vault_created" });
+  }
+
+  const blockTimeEpoch = context.blockTime;
+  const activityType = type || "vault_created";
 
   return {
-    id: `${context.txSig}:${type}:${context.slot}`,
+    id: `${context.txSig}:${activityType}:${context.slot}`,
     txSig: context.txSig,
     slot: context.slot,
-    blockTime: context.blockTime ? new Date(context.blockTime * 1000).toISOString() : null,
-    type,
+    blockTime: blockTimeEpoch ? new Date(blockTimeEpoch * 1000).toISOString() : null,
+    blockTimeEpoch,
+    type: activityType,
     vaultPda: context.vaultPda || null,
     positionPda: context.positionPda || null,
     authority: context.authority || null,

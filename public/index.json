@@ -1,1 +1,6 @@
-{}
+{
+  "name": "VitalFi API",
+  "description": "Solana Vault Indexing Service for VitalFi",
+  "documentation": "https://github.com/credit-markets/vitalfi-backend",
+  "website": "https://vitalfi.lat"
+}

@@ -11,15 +11,15 @@ import { zrevrangebyscore, getJSON } from "../lib/kv.js";
 import { json, error } from "../lib/http.js";
 import { kVaultActivity, kOwnerActivity } from "../lib/keys.js";
 import { createEtag } from "../lib/etag.js";
-import { parseCursor, nextCursorFromLastItem } from "../lib/pagination.js";
 import { cfg } from "../lib/env.js";
-import { logRequest } from "../lib/logger.js";
+import { logRequest, errorLog } from "../lib/logger.js";
+import { isValidPubkey, cursorSchema } from "../lib/validation.js";
 import type { ActivityDTO } from "../types/dto.js";
 
 const QuerySchema = z.object({
-  vault: z.string().min(32).max(44).optional(),
-  owner: z.string().min(32).max(44).optional(),
-  cursor: z.string().optional(),
+  vault: z.string().min(32).max(44).refine(isValidPubkey, "Invalid Base58 public key").optional(),
+  owner: z.string().min(32).max(44).refine(isValidPubkey, "Invalid Base58 public key").optional(),
+  cursor: cursorSchema,
   limit: z.coerce.number().min(1).max(100).default(50),
 }).refine((data) => data.vault || data.owner, {
   message: "Either vault or owner must be provided",
@@ -44,12 +44,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Choose ZSET key
     const zsetKey = vault ? kVaultActivity(vault) : kOwnerActivity(owner!);
 
-    // Parse cursor (ISO timestamp → Unix epoch)
-    const maxScore = parseCursor(cursor);
+    // Use exclusive cursor to prevent duplicate items across pages
+    // Redis ZREVRANGEBYSCORE supports exclusive ranges with parentheses: (score
+    // This ensures items with exactly cursor value are excluded
+    const maxScore = cursor !== undefined ? `(${cursor}` : '+inf';
 
     // Fetch activity IDs from ZSET (reverse chronological order)
     // Fetch limit+1 to detect if there are more items
-    const activityIds = await zrevrangebyscore(zsetKey, maxScore, "-inf", {
+    const activityIds = await zrevrangebyscore(zsetKey, maxScore, 0, {
       offset: 0,
       count: limit + 1,
     });
@@ -67,8 +69,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       (a): a is ActivityDTO => a !== null
     );
 
-    // Compute next cursor
-    const nextCursor = hasMore ? nextCursorFromLastItem(activities[activities.length - 1]) : null;
+    // Compute next cursor using blockTimeEpoch (fallback to slot if null)
+    const nextCursor = hasMore && activities.length > 0
+      ? (activities[activities.length - 1].blockTimeEpoch ?? activities[activities.length - 1].slot)
+      : null;
 
     const body = {
       items: activities,
@@ -92,6 +96,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     logRequest("GET", "/api/activity", 200, Date.now() - start);
     return json(res, 200, body, etag, cfg.cacheTtl);
   } catch (err) {
+    const queryError = err instanceof Error ? err : new Error(String(err));
+    errorLog("Activity query failed", { query: req.query, error: queryError });
     logRequest("GET", "/api/activity", 500, Date.now() - start);
     return error(res, 500, "Internal server error");
   }

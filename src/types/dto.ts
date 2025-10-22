@@ -9,16 +9,23 @@ export type VaultStatus = "Funding" | "Active" | "Matured" | "Canceled";
 
 export type VaultDTO = {
   vaultPda: string;
+  vaultTokenAccount: string;
   authority: string;
   vaultId: string;
   assetMint: string | null;
   status: VaultStatus;
   cap: string | null;
   totalDeposited: string | null;
+  totalClaimed: string | null;
+  targetApyBps: number | null;
+  minDeposit: string | null;
   fundingEndTs: string | null;
   maturityTs: string | null;
+  payoutNum: string | null; // Payout numerator (u128 as string)
+  payoutDen: string | null; // Payout denominator (u128 as string)
   slot: number | null;
   updatedAt: string; // ISO 8601
+  updatedAtEpoch: number; // Unix epoch seconds for cursor pagination
 };
 
 export type PositionDTO = {
@@ -29,6 +36,7 @@ export type PositionDTO = {
   claimed: string | null;
   slot: number | null;
   updatedAt: string; // ISO 8601
+  updatedAtEpoch: number; // Unix epoch seconds for cursor pagination
 };
 
 export type ActivityType =
@@ -46,6 +54,7 @@ export type ActivityDTO = {
   txSig: string;
   slot: number;
   blockTime: string | null; // ISO 8601 or null
+  blockTimeEpoch: number | null; // Unix epoch seconds for ZSET scores
   type: ActivityType;
   vaultPda: string | null;
   positionPda: string | null;

@@ -12,12 +12,7 @@ export function kVaultJson(pda: string): string {
   return `vault:${pda}:json`;
 }
 
-/**
- * Vault summary (optional, for future use)
- */
-export function kVaultSummary(pda: string): string {
-  return `vault:${pda}:summary`;
-}
+// Removed kVaultSummary - unused function
 
 /**
  * Global set of all vault PDAs
@@ -34,6 +29,16 @@ export function kAuthorityVaults(authority: string): string {
 }
 
 /**
+ * Sorted set of vault PDAs for a given authority (sorted by updatedAtEpoch)
+ * Optional status parameter for per-status indexes
+ */
+export function kAuthorityVaultsByUpdated(authority: string, status?: string): string {
+  return status
+    ? `authority:${authority}:vaults:by_updated:${status}`
+    : `authority:${authority}:vaults:by_updated`;
+}
+
+/**
  * Position JSON blob
  */
 export function kPositionJson(pda: string): string {
@@ -45,6 +50,13 @@ export function kPositionJson(pda: string): string {
  */
 export function kOwnerPositions(owner: string): string {
   return `owner:${owner}:positions`;
+}
+
+/**
+ * Sorted set of position PDAs for a given owner (sorted by updatedAtEpoch)
+ */
+export function kOwnerPositionsByUpdated(owner: string): string {
+  return `owner:${owner}:positions:by_updated`;
 }
 
 /**

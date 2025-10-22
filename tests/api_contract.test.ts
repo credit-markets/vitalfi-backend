@@ -9,20 +9,29 @@ describe("API response shapes", () => {
   it("should match VaultDTO shape", () => {
     const vault: VaultDTO = {
       vaultPda: "test",
+      vaultTokenAccount: "test",
       authority: "test",
       vaultId: "1",
       assetMint: "test",
       status: "Funding",
       cap: "1000",
       totalDeposited: "500",
+      totalClaimed: "0",
+      targetApyBps: 500,
+      minDeposit: "100",
       fundingEndTs: "1234567890",
       maturityTs: "1234567890",
+      payoutNum: "0",
+      payoutDen: "1",
       slot: 123,
       updatedAt: new Date().toISOString(),
+      updatedAtEpoch: Math.floor(Date.now() / 1000),
     };
 
     expect(vault).toHaveProperty("vaultPda");
+    expect(vault).toHaveProperty("vaultTokenAccount");
     expect(vault).toHaveProperty("status");
+    expect(vault).toHaveProperty("updatedAtEpoch");
   });
 
   it("should match PositionDTO shape", () => {
@@ -34,10 +43,12 @@ describe("API response shapes", () => {
       claimed: "0",
       slot: 123,
       updatedAt: new Date().toISOString(),
+      updatedAtEpoch: Math.floor(Date.now() / 1000),
     };
 
     expect(position).toHaveProperty("positionPda");
     expect(position).toHaveProperty("deposited");
+    expect(position).toHaveProperty("updatedAtEpoch");
   });
 
   it("should match ActivityDTO shape", () => {
@@ -46,6 +57,7 @@ describe("API response shapes", () => {
       txSig: "test",
       slot: 123,
       blockTime: new Date().toISOString(),
+      blockTimeEpoch: Math.floor(Date.now() / 1000),
       type: "deposit",
       vaultPda: "test",
       positionPda: null,
@@ -57,5 +69,6 @@ describe("API response shapes", () => {
 
     expect(activity).toHaveProperty("id");
     expect(activity).toHaveProperty("type");
+    expect(activity).toHaveProperty("blockTimeEpoch");
   });
 });

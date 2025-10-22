@@ -7,24 +7,42 @@
 
 import { createClient } from "redis";
 import { cfg } from "./env.js";
+import { errorLog } from "./logger.js";
+import { PING_INTERVAL_MS } from "./constants.js";
 
 // Global Redis client instance
 let redis: ReturnType<typeof createClient> | null = null;
 let connecting: Promise<void> | null = null;
+let lastPingTime = 0;
 
 /**
  * Get or create Redis client (singleton pattern for serverless)
  */
 async function getClient() {
-  // If client exists and is open, verify it's healthy with a ping
+  // If client exists and is open, trust isOpen flag on fast path
+  // Only ping if we haven't verified connection health recently
   if (redis?.isOpen) {
-    try {
-      await redis.ping();
+    const now = Date.now();
+    const needsPing = now - lastPingTime > PING_INTERVAL_MS;
+
+    if (needsPing) {
+      try {
+        await redis.ping();
+        lastPingTime = now;
+        return redis;
+      } catch (err) {
+        errorLog('Redis ping failed, reconnecting', err);
+        // Gracefully close the old connection to prevent socket leaks
+        await redis.quit().catch((quitErr) => {
+          errorLog('Failed to close stale Redis connection', { error: quitErr });
+        });
+        redis = null;
+        connecting = null;
+        lastPingTime = 0;
+      }
+    } else {
+      // Fast path: skip ping, trust isOpen
       return redis;
-    } catch (err) {
-      console.error('Redis ping failed, reconnecting:', err);
-      redis = null;
-      connecting = null;
     }
   }
 
@@ -39,7 +57,7 @@ async function getClient() {
 
   // Create new client
   redis = createClient({ url: cfg.redisUrl });
-  redis.on('error', (err) => console.error('Redis Client Error:', err));
+  redis.on('error', (err) => errorLog('Redis Client Error', err));
 
   // Clean up on connection end (for serverless environments)
   redis.on('end', () => {
@@ -50,9 +68,11 @@ async function getClient() {
   // Connect
   connecting = redis.connect().then(() => {
     connecting = null;
+    lastPingTime = Date.now(); // Mark connection as healthy
   }).catch((err) => {
     connecting = null;
     redis = null;
+    lastPingTime = 0;
     throw err;
   });
 
@@ -88,7 +108,7 @@ export async function getJSON<T>(key: string): Promise<T | null> {
   try {
     return JSON.parse(value) as T;
   } catch (err) {
-    console.error(`Failed to parse JSON for key ${prefixedKey}:`, err);
+    errorLog(`Failed to parse JSON for key ${prefixedKey}`, err);
     return null;
   }
 }
@@ -145,6 +165,16 @@ export async function zadd(
 }
 
 /**
+ * Remove member from sorted set
+ */
+export async function zrem(key: string, ...members: string[]): Promise<number> {
+  const client = await getClient();
+  const prefixedKey = `${cfg.prefix}${key}`;
+  const result = await client.zRem(prefixedKey, members);
+  return result ?? 0;
+}
+
+/**
  * Get members from sorted set by score range (reverse order: max to min)
  */
 export async function zrevrangebyscore(
@@ -181,11 +211,26 @@ export async function exists(key: string): Promise<boolean> {
 
 /**
  * Set key only if it doesn't exist (returns 1 if set, 0 if already exists)
+ * Supports optional TTL in seconds
  */
-export async function setnx(key: string, value: unknown): Promise<number> {
+export async function setnx(
+  key: string,
+  value: unknown,
+  opts?: { ex?: number }
+): Promise<number> {
   const client = await getClient();
   const prefixedKey = `${cfg.prefix}${key}`;
   const stringValue = JSON.stringify(value);
-  const result = await client.setNX(prefixedKey, stringValue);
-  return result ? 1 : 0;
+
+  if (opts?.ex) {
+    // Use SET with NX and EX options for atomic operation
+    const result = await client.set(prefixedKey, stringValue, {
+      NX: true,
+      EX: opts.ex,
+    });
+    return result === "OK" ? 1 : 0;
+  } else {
+    const result = await client.setNX(prefixedKey, stringValue);
+    return result ? 1 : 0;
+  }
 }
