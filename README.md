@@ -45,6 +45,7 @@ curl http://localhost:3000/api/health
 ```
 
 Expected response:
+
 ```json
 {
   "ok": true,
@@ -60,6 +61,7 @@ Expected response:
 Health check endpoint.
 
 **Response:**
+
 ```json
 {
   "ok": true,
@@ -75,31 +77,44 @@ Health check endpoint.
 List vaults by authority.
 
 **Query Params:**
+
 - `authority` (required): Authority pubkey
 - `status` (optional): Filter by "Funding" | "Active" | "Matured" | "Canceled"
 - `limit` (optional): Max items (default 50, max 100)
 
 **Example:**
+
 ```bash
 curl "http://localhost:3000/api/vaults?authority=11111111111111111111111111111111"
 ```
 
 **Response:**
+
 ```json
 {
   "items": [
     {
       "vaultPda": "...",
+      "vaultTokenAccount": "...",
       "authority": "...",
       "vaultId": "1",
+      "assetMint": "So11111111111111111111111111111111111111112",
       "status": "Funding",
       "cap": "100000000000",
       "totalDeposited": "50000000000",
+      "totalClaimed": "0",
+      "targetApyBps": 500,
+      "minDeposit": "1000000",
+      "fundingEndTs": "1729468800",
+      "maturityTs": null,
+      "payoutNum": null,
+      "payoutDen": null,
       "slot": 123456789,
-      "updatedAt": "2025-10-20T12:00:00.000Z"
+      "updatedAt": "2025-10-20T12:00:00.000Z",
+      "updatedAtEpoch": 1697900000
     }
   ],
-  "nextCursor": null,
+  "nextCursor": 1697900000,
   "total": 1
 }
 ```
@@ -111,10 +126,12 @@ curl "http://localhost:3000/api/vaults?authority=1111111111111111111111111111111
 List positions for a user.
 
 **Query Params:**
+
 - `owner` (required): User wallet pubkey
 - `limit` (optional): Max items (default 50, max 100)
 
 **Example:**
+
 ```bash
 curl "http://localhost:3000/api/positions?owner=11111111111111111111111111111111"
 ```
@@ -126,18 +143,21 @@ curl "http://localhost:3000/api/positions?owner=11111111111111111111111111111111
 Paginated activity feed for a vault or user.
 
 **Query Params:**
+
 - `vault` (optional): Vault PDA - exactly one of vault/owner required
 - `owner` (optional): User pubkey
 - `cursor` (optional): ISO timestamp for pagination
 - `limit` (optional): Page size (default 50, max 100)
 
 **Example:**
+
 ```bash
 curl "http://localhost:3000/api/activity?vault=Vault..."
 curl "http://localhost:3000/api/activity?owner=Owner...&cursor=2025-10-20T12:00:00.000Z&limit=20"
 ```
 
 **Response:**
+
 ```json
 {
   "items": [
@@ -164,6 +184,7 @@ curl "http://localhost:3000/api/activity?owner=Owner...&cursor=2025-10-20T12:00:
 Receives account update events from Helius.
 
 **Authentication:**
+
 - `X-Helius-Signature` header (HMAC SHA256)
 - `?token` query param must match `HELIUS_WEBHOOK_SECRET`
 
@@ -223,16 +244,16 @@ npm run build
 
 ## KV Keyspace
 
-| Key | Type | Purpose |
-|-----|------|---------|
-| `vault:{pda}:json` | STRING | Vault data |
-| `position:{pda}:json` | STRING | Position data |
-| `activity:{sig}:{type}:{slot}` | STRING | Activity event |
-| `vaults:set` | SET | All vault PDAs |
-| `authority:{pk}:vaults` | SET | Vaults by authority |
-| `owner:{pk}:positions` | SET | Positions by owner |
-| `vault:{pda}:activity` | ZSET | Activity for vault (score: blockTime) |
-| `owner:{pk}:activity` | ZSET | Activity for owner (score: blockTime) |
+| Key                            | Type   | Purpose                               |
+| ------------------------------ | ------ | ------------------------------------- |
+| `vault:{pda}:json`             | STRING | Vault data                            |
+| `position:{pda}:json`          | STRING | Position data                         |
+| `activity:{sig}:{type}:{slot}` | STRING | Activity event                        |
+| `vaults:set`                   | SET    | All vault PDAs                        |
+| `authority:{pk}:vaults`        | SET    | Vaults by authority                   |
+| `owner:{pk}:positions`         | SET    | Positions by owner                    |
+| `vault:{pda}:activity`         | ZSET   | Activity for vault (score: blockTime) |
+| `owner:{pk}:activity`          | ZSET   | Activity for owner (score: blockTime) |
 
 ---
 
@@ -247,15 +268,18 @@ Solana → Helius → POST /api/webhooks/helius → KV → GET /api/* → Fronte
 ## Troubleshooting
 
 **HMAC verification fails:**
+
 - Ensure `HELIUS_WEBHOOK_SECRET` matches in Helius dashboard and `.env.local`
 - Check that raw body is used (not parsed JSON)
 
 **Redis connection fails:**
+
 - Verify `REDIS_URL` is set correctly (Vercel KV provides this automatically)
 - Check Vercel KV is provisioned and linked to your project
 - Ensure the redis client singleton is properly initialized
 
 **404 on endpoints:**
+
 - Ensure file paths match Vercel routing: `src/api/*.ts` → `/api/*`
 - Check `vercel.json` configuration
 
@@ -263,7 +287,6 @@ Solana → Helius → POST /api/webhooks/helius → KV → GET /api/* → Fronte
 
 ## Links
 
-- [PLAN.md](./PLAN.md) - Full architecture documentation
 - [Vercel Docs](https://vercel.com/docs)
 - [Helius Docs](https://docs.helius.dev)
 - [Anchor Docs](https://www.anchor-lang.com/)
