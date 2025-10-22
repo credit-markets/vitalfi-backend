@@ -28,10 +28,14 @@ export function isValidPubkey(pubkey: string): boolean {
 /**
  * Shared cursor validation schema
  * Validates Unix epoch seconds with optional future allowance for clock skew/test data
+ * Uses .refine() for dynamic validation to prevent stale max values in long-lived serverless instances
  */
 export const cursorSchema = z.coerce
   .number()
   .int()
   .positive()
-  .max(getMaxCursorValue(), "Cursor value too far in the future")
+  .refine(
+    (val) => val <= getMaxCursorValue(),
+    { message: "Cursor value too far in the future" }
+  )
   .optional();

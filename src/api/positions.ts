@@ -42,6 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Redis ZREVRANGEBYSCORE supports exclusive ranges with parentheses
     const maxScore = cursor !== undefined ? `(${cursor}` : '+inf';
     let pdas: string[];
+    let usedZset = false;
 
     try {
       // Fetch limit + 1 to determine if there are more results
@@ -51,6 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         0,
         { offset: 0, count: limit + 1 }
       );
+      usedZset = true;
     } catch (err) {
       // Fallback to SET if ZSET doesn't exist yet
       pdas = await smembers(kOwnerPositions(owner));
@@ -83,8 +85,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     });
 
-    // Sort by updatedAtEpoch DESC (most recent first)
-    positions.sort((a, b) => b.updatedAtEpoch - a.updatedAtEpoch);
+    // Sort by updatedAtEpoch DESC only if using unordered SET fallback
+    // ZSET already provides sorted order (most recent first)
+    if (!usedZset) {
+      positions.sort((a, b) => b.updatedAtEpoch - a.updatedAtEpoch);
+    }
 
     // Check if there are more results
     const hasMore = positions.length > limit;

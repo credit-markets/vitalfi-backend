@@ -33,7 +33,9 @@ async function getClient() {
       } catch (err) {
         errorLog('Redis ping failed, reconnecting', err);
         // Gracefully close the old connection to prevent socket leaks
-        await redis.quit().catch(() => {});
+        await redis.quit().catch((quitErr) => {
+          errorLog('Failed to close stale Redis connection', { error: quitErr });
+        });
         redis = null;
         connecting = null;
         lastPingTime = 0;

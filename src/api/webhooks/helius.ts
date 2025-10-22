@@ -133,9 +133,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const validationResult = heliusWebhookPayloadSchema.safeParse(rawPayload);
 
     if (!validationResult.success) {
-      // Log the actual payload structure for debugging
+      // Log the actual payload structure for debugging (sanitize keys to prevent log injection)
+      const sanitizeKey = (k: string) => k.slice(0, 100).replace(/[\r\n\x00-\x1F]/g, '?');
       info("Received webhook with invalid structure - likely a test payload", {
-        payloadKeys: typeof rawPayload === 'object' && rawPayload !== null ? Object.keys(rawPayload) : [],
+        payloadKeys: typeof rawPayload === 'object' && rawPayload !== null
+          ? Object.keys(rawPayload).slice(0, 10).map(sanitizeKey)
+          : [],
         validationErrors: validationResult.error.errors,
       });
 
@@ -289,8 +292,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           }
         } else {
-          // No previous state - use total for initialization
-          if (action === "initializeVault" && newVault.totalDeposited > 0n) {
+          // No previous state - use current total for any deposit-like action
+          if ((action === "deposit" || action === "initializeVault") && newVault.totalDeposited > 0n) {
             amount = newVault.totalDeposited.toString();
           }
         }

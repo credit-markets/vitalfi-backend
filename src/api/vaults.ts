@@ -96,8 +96,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? vaults
       : vaults.filter((v) => v.status === status);
 
-    // Sort by updatedAtEpoch DESC (most recent first)
-    filtered.sort((a, b) => b.updatedAtEpoch - a.updatedAtEpoch);
+    // Sort by updatedAtEpoch DESC only if using unordered SET fallback
+    // ZSET already provides sorted order (most recent first)
+    if (!usedZset) {
+      filtered.sort((a, b) => b.updatedAtEpoch - a.updatedAtEpoch);
+    }
 
     // Check if there are more results
     const hasMore = filtered.length > limit;
