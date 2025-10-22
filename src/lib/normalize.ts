@@ -4,8 +4,22 @@
  * Convert decoded Anchor accounts to compact DTOs for storage.
  */
 
+import { PublicKey } from "@solana/web3.js";
 import type { DecodedVault, DecodedPosition } from "./anchor.js";
 import type { VaultDTO, PositionDTO, ActivityDTO, VaultStatus, ActivityType } from "../types/dto.js";
+import { cfg } from "./env.js";
+
+/**
+ * Derive Vault Token Account PDA
+ * Seeds: ["vault_token", vault]
+ */
+function getVaultTokenAccount(vaultPda: string): string {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault_token"), new PublicKey(vaultPda).toBuffer()],
+    new PublicKey(cfg.programId)
+  );
+  return pda.toBase58();
+}
 
 /**
  * Map Anchor vault status enum to DTO string
@@ -29,9 +43,10 @@ export function toVaultDTO(
 ): VaultDTO {
   const now = Date.now();
   const updatedAtEpoch = blockTime || Math.floor(now / 1000);
-  
+
   return {
     vaultPda: pda,
+    vaultTokenAccount: getVaultTokenAccount(pda),
     authority: decoded.authority.toBase58(),
     vaultId: decoded.vaultId.toString(),
     assetMint: decoded.assetMint.toBase58(),
@@ -74,6 +89,20 @@ export function toPositionDTO(
 }
 
 /**
+ * Map Solana instruction names to ActivityType enum
+ */
+const ACTION_TYPE_MAP: Record<string, ActivityType> = {
+  initializeVault: "vault_created",
+  deposit: "deposit",
+  claim: "claim",
+  finalizeFunding: "funding_finalized",
+  matureVault: "matured",
+  cancelVault: "canceled",
+  authorityWithdraw: "authority_withdraw",
+  // Note: position_created is inferred when position appears in accounts
+};
+
+/**
  * Convert action and context to ActivityDTO
  */
 export function toActivityDTO(
@@ -90,23 +119,24 @@ export function toActivityDTO(
     assetMint?: string;
   }
 ): ActivityDTO {
-  // Map action names to ActivityType
-  let type: ActivityType = "vault_created";
-  if (action === "deposit") type = "deposit";
-  else if (action === "claim") type = "claim";
-  else if (action === "finalizeFunding") type = "funding_finalized";
-  else if (action === "matureVault") type = "matured";
-  else if (action === "initializeVault") type = "vault_created";
+  // Map action names to ActivityType with fallback logging
+  const type = ACTION_TYPE_MAP[action];
+
+  if (!type) {
+    console.warn(`Unknown action type: ${action}, defaulting to vault_created`);
+    // Fallback to vault_created for unknown actions
+  }
 
   const blockTimeEpoch = context.blockTime;
+  const activityType = type || "vault_created";
 
   return {
-    id: `${context.txSig}:${type}:${context.slot}`,
+    id: `${context.txSig}:${activityType}:${context.slot}`,
     txSig: context.txSig,
     slot: context.slot,
     blockTime: blockTimeEpoch ? new Date(blockTimeEpoch * 1000).toISOString() : null,
     blockTimeEpoch,
-    type,
+    type: activityType,
     vaultPda: context.vaultPda || null,
     positionPda: context.positionPda || null,
     authority: context.authority || null,

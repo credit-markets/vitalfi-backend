@@ -9,6 +9,7 @@ describe("API response shapes", () => {
   it("should match VaultDTO shape", () => {
     const vault: VaultDTO = {
       vaultPda: "test",
+      vaultTokenAccount: "test",
       authority: "test",
       vaultId: "1",
       assetMint: "test",
@@ -26,6 +27,7 @@ describe("API response shapes", () => {
     };
 
     expect(vault).toHaveProperty("vaultPda");
+    expect(vault).toHaveProperty("vaultTokenAccount");
     expect(vault).toHaveProperty("status");
     expect(vault).toHaveProperty("updatedAtEpoch");
   });

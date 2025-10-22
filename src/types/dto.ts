@@ -9,6 +9,7 @@ export type VaultStatus = "Funding" | "Active" | "Matured" | "Canceled";
 
 export type VaultDTO = {
   vaultPda: string;
+  vaultTokenAccount: string;
   authority: string;
   vaultId: string;
   assetMint: string | null;

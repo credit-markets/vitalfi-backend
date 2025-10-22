@@ -12,22 +12,35 @@ import { errorLog } from "./logger.js";
 // Global Redis client instance
 let redis: ReturnType<typeof createClient> | null = null;
 let connecting: Promise<void> | null = null;
+let lastPingTime = 0;
+const PING_INTERVAL_MS = 30000; // Only ping if 30s since last successful operation
 
 /**
  * Get or create Redis client (singleton pattern for serverless)
  */
 async function getClient() {
-  // If client exists and is open, verify it's healthy with a ping
+  // If client exists and is open, trust isOpen flag on fast path
+  // Only ping if we haven't verified connection health recently
   if (redis?.isOpen) {
-    try {
-      await redis.ping();
+    const now = Date.now();
+    const needsPing = now - lastPingTime > PING_INTERVAL_MS;
+
+    if (needsPing) {
+      try {
+        await redis.ping();
+        lastPingTime = now;
+        return redis;
+      } catch (err) {
+        errorLog('Redis ping failed, reconnecting', err);
+        // Gracefully close the old connection to prevent socket leaks
+        await redis.quit().catch(() => {});
+        redis = null;
+        connecting = null;
+        lastPingTime = 0;
+      }
+    } else {
+      // Fast path: skip ping, trust isOpen
       return redis;
-    } catch (err) {
-      errorLog('Redis ping failed, reconnecting', err);
-      // Gracefully close the old connection to prevent socket leaks
-      await redis.quit().catch(() => {});
-      redis = null;
-      connecting = null;
     }
   }
 
@@ -53,9 +66,11 @@ async function getClient() {
   // Connect
   connecting = redis.connect().then(() => {
     connecting = null;
+    lastPingTime = Date.now(); // Mark connection as healthy
   }).catch((err) => {
     connecting = null;
     redis = null;
+    lastPingTime = 0;
     throw err;
   });
 

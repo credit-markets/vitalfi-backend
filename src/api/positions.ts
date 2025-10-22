@@ -17,7 +17,7 @@ import type { PositionDTO } from "../types/dto.js";
 
 const QuerySchema = z.object({
   owner: z.string().min(32).max(44).refine(isValidPubkey, "Invalid Base58 public key"),
-  cursor: z.coerce.number().int().positive().max(Math.floor(Date.now() / 1000) + 86400).optional(),
+  cursor: z.coerce.number().int().positive().max(Math.floor(Date.now() / 1000) + 7 * 86400).optional(),
   limit: z.coerce.number().min(1).max(100).default(50),
 });
 

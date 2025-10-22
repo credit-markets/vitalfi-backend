@@ -18,7 +18,7 @@ import type { VaultDTO } from "../types/dto.js";
 const QuerySchema = z.object({
   authority: z.string().min(32).max(44).refine(isValidPubkey, "Invalid Base58 public key"),
   status: z.enum(["Funding", "Active", "Matured", "Canceled"]).optional(),
-  cursor: z.coerce.number().int().positive().max(Math.floor(Date.now() / 1000) + 86400).optional(),
+  cursor: z.coerce.number().int().positive().max(Math.floor(Date.now() / 1000) + 7 * 86400).optional(), // Allow 1 week future for clock skew/test data
   limit: z.coerce.number().min(1).max(100).default(50),
 });
 
