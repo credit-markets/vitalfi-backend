@@ -58,6 +58,8 @@ export function toVaultDTO(
     minDeposit: decoded.minDeposit.toString(),
     fundingEndTs: decoded.fundingEndTs.toString(),
     maturityTs: decoded.maturityTs.toString(),
+    payoutNum: decoded.payoutNum.toString(),
+    payoutDen: decoded.payoutDen.toString(),
     slot,
     updatedAt: new Date(updatedAtEpoch * 1000).toISOString(),
     updatedAtEpoch,

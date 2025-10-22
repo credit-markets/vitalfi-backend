@@ -21,6 +21,8 @@ describe("API response shapes", () => {
       minDeposit: "100",
       fundingEndTs: "1234567890",
       maturityTs: "1234567890",
+      payoutNum: "0",
+      payoutDen: "1",
       slot: 123,
       updatedAt: new Date().toISOString(),
       updatedAtEpoch: Math.floor(Date.now() / 1000),
