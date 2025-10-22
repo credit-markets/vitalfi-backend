@@ -28,6 +28,7 @@ import {
 } from "../../lib/keys.js";
 import { cfg } from "../../lib/env.js";
 import { info, errorLog } from "../../lib/logger.js";
+import { MAX_WEBHOOK_PAYLOAD_SIZE } from "../../lib/constants.js";
 import type { HeliusWebhookPayload } from "../../types/helius.js";
 import { heliusWebhookPayloadSchema } from "../../types/helius.js";
 
@@ -39,12 +40,22 @@ export const config = {
 };
 
 /**
- * Read raw body from request stream
+ * Read raw body from request stream with size limit
  */
 async function getRawBody(req: VercelRequest): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = "";
+    let size = 0;
+
     req.on("data", (chunk) => {
+      size += chunk.length;
+
+      // Prevent DoS via large payloads
+      if (size > MAX_WEBHOOK_PAYLOAD_SIZE) {
+        reject(new Error("Payload too large"));
+        return;
+      }
+
       body += chunk.toString();
     });
     req.on("end", () => resolve(body));
@@ -58,8 +69,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return error(res, 405, "Method not allowed");
     }
 
-    // Read raw body for HMAC verification
-    const rawBody = await getRawBody(req);
+    // Read raw body for HMAC verification with size validation
+    let rawBody: string;
+    try {
+      rawBody = await getRawBody(req);
+    } catch (err) {
+      const error_msg = err instanceof Error ? err.message : String(err);
+      if (error_msg.includes("Payload too large")) {
+        errorLog("Webhook payload too large", { error: error_msg });
+        return error(res, 413, "Payload too large");
+      }
+      throw err;
+    }
 
     // Verify token from multiple sources for Helius webhook compatibility:
     // - Query param: ?token={secret} (legacy/URL-based auth)
@@ -103,7 +124,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       rawPayload = JSON.parse(rawBody);
     } catch (err) {
-      errorLog("Failed to parse webhook payload", err);
+      const parseError = err instanceof Error ? err : new Error(String(err));
+      errorLog("Failed to parse webhook payload", parseError);
       return error(res, 400, "Invalid JSON payload");
     }
 
@@ -152,6 +174,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const oldVaults = new Map<string, import("../../types/dto.js").VaultDTO>();
     const oldPositions = new Map<string, import("../../types/dto.js").PositionDTO>();
 
+    // Batch fetch all existing vaults and positions in parallel (performance optimization)
+    const vaultPdas = decoded.filter(d => d.type === "vault").map(d => d.pda);
+    const positionPdas = decoded.filter(d => d.type === "position").map(d => d.pda);
+
+    const [existingVaults, existingPositions] = await Promise.all([
+      Promise.all(vaultPdas.map(pda => getJSON<import("../../types/dto.js").VaultDTO>(kVaultJson(pda)))),
+      Promise.all(positionPdas.map(pda => getJSON<import("../../types/dto.js").PositionDTO>(kPositionJson(pda)))),
+    ]);
+
+    // Build maps for quick lookup
+    vaultPdas.forEach((pda, i) => {
+      const existing = existingVaults[i];
+      if (existing) {
+        oldVaults.set(pda, existing);
+      }
+    });
+
+    positionPdas.forEach((pda, i) => {
+      const existing = existingPositions[i];
+      if (existing) {
+        oldPositions.set(pda, existing);
+      }
+    });
+
     // Process each decoded account with batch operations for better performance
     const accountOperations: Promise<unknown>[] = [];
 
@@ -160,11 +206,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const vaultData = item.data as import("../../lib/anchor.js").DecodedVault;
         const dto = toVaultDTO(item.pda, vaultData, payload.slot, payload.blockTime);
 
-        // Check if vault exists to detect status changes and store for amount calculation
-        const existingVault = await getJSON<import("../../types/dto.js").VaultDTO>(kVaultJson(item.pda));
-        if (existingVault) {
-          oldVaults.set(item.pda, existingVault);
-        }
+        // Get existing vault from pre-fetched map
+        const existingVault = oldVaults.get(item.pda);
 
         // Batch all vault operations including ZSET for ordering
         // Also write to per-status ZSET for efficient filtered queries
@@ -190,11 +233,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const positionData = item.data as import("../../lib/anchor.js").DecodedPosition;
         const dto = toPositionDTO(item.pda, positionData, payload.slot, payload.blockTime);
 
-        // Store old position for amount calculation
-        const existingPosition = await getJSON<import("../../types/dto.js").PositionDTO>(kPositionJson(item.pda));
-        if (existingPosition) {
-          oldPositions.set(item.pda, existingPosition);
-        }
+        // Get existing position from pre-fetched map (no await needed)
+        // Already fetched in parallel above
 
         // Batch all position operations including ZSET for ordering
         accountOperations.push(
@@ -325,7 +365,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           await Promise.all(zsetOps);
           activitiesProcessed++;
         } catch (err) {
-          errorLog("Failed to index activity in ZSETs", { activityKey, err });
+          const indexError = err instanceof Error ? err : new Error(String(err));
+          errorLog("Failed to index activity in ZSETs", { activityKey, error: indexError });
           // Activity was created but not fully indexed - this will be caught in monitoring
           // Don't re-throw to avoid failing the entire webhook
         }
@@ -347,7 +388,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     });
   } catch (err) {
-    errorLog("Webhook processing failed", err);
+    const processingError = err instanceof Error ? err : new Error(String(err));
+    errorLog("Webhook processing failed", processingError);
     return error(res, 500, "Internal server error");
   }
 }

@@ -8,12 +8,12 @@
 import { createClient } from "redis";
 import { cfg } from "./env.js";
 import { errorLog } from "./logger.js";
+import { PING_INTERVAL_MS } from "./constants.js";
 
 // Global Redis client instance
 let redis: ReturnType<typeof createClient> | null = null;
 let connecting: Promise<void> | null = null;
 let lastPingTime = 0;
-const PING_INTERVAL_MS = 30000; // Only ping if 30s since last successful operation
 
 /**
  * Get or create Redis client (singleton pattern for serverless)

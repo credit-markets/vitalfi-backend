@@ -13,6 +13,7 @@ import { createEtag } from "../lib/etag.js";
 import { cfg } from "../lib/env.js";
 import { logRequest, errorLog } from "../lib/logger.js";
 import { isValidPubkey } from "../lib/validation.js";
+import { MAX_SET_SIZE, SET_WARNING_THRESHOLD } from "../lib/constants.js";
 import type { VaultDTO } from "../types/dto.js";
 
 const QuerySchema = z.object({
@@ -63,14 +64,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       pdas = await smembers(kAuthorityVaults(authority));
 
       // Hard limit to prevent memory issues with large SETs
-      const MAX_SET_SIZE = 1000;
       if (pdas.length > MAX_SET_SIZE) {
         errorLog(`SET too large for authority ${authority}`, { vaultCount: pdas.length, maxAllowed: MAX_SET_SIZE });
         return error(res, 503, "Too many vaults - ZSET index not ready. Please retry in a few seconds.");
       }
 
       // Log warning for large SET fallbacks
-      if (pdas.length > 100) {
+      if (pdas.length > SET_WARNING_THRESHOLD) {
         errorLog(`Large SET fallback for authority ${authority}`, { vaultCount: pdas.length, severity: "warning" });
       }
     }
@@ -122,7 +122,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     logRequest("GET", "/api/vaults", 200, Date.now() - start);
     return json(res, 200, body, etag, cfg.cacheTtl);
   } catch (err) {
-    errorLog("Vaults query failed", { query: req.query, err });
+    const queryError = err instanceof Error ? err : new Error(String(err));
+    errorLog("Vaults query failed", { query: req.query, error: queryError });
     logRequest("GET", "/api/vaults", 500, Date.now() - start);
     return error(res, 500, "Internal server error");
   }

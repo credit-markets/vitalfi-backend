@@ -69,9 +69,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       (a): a is ActivityDTO => a !== null
     );
 
-    // Compute next cursor using blockTimeEpoch
+    // Compute next cursor using blockTimeEpoch (fallback to slot if null)
     const nextCursor = hasMore && activities.length > 0
-      ? activities[activities.length - 1].blockTimeEpoch
+      ? (activities[activities.length - 1].blockTimeEpoch ?? activities[activities.length - 1].slot)
       : null;
 
     const body = {
@@ -96,7 +96,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     logRequest("GET", "/api/activity", 200, Date.now() - start);
     return json(res, 200, body, etag, cfg.cacheTtl);
   } catch (err) {
-    errorLog("Activity query failed", { query: req.query, err });
+    const queryError = err instanceof Error ? err : new Error(String(err));
+    errorLog("Activity query failed", { query: req.query, error: queryError });
     logRequest("GET", "/api/activity", 500, Date.now() - start);
     return error(res, 500, "Internal server error");
   }

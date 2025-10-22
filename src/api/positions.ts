@@ -13,6 +13,7 @@ import { createEtag } from "../lib/etag.js";
 import { cfg } from "../lib/env.js";
 import { logRequest, errorLog } from "../lib/logger.js";
 import { isValidPubkey } from "../lib/validation.js";
+import { MAX_SET_SIZE, SET_WARNING_THRESHOLD } from "../lib/constants.js";
 import type { PositionDTO } from "../types/dto.js";
 
 const QuerySchema = z.object({
@@ -55,14 +56,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       pdas = await smembers(kOwnerPositions(owner));
 
       // Hard limit to prevent memory issues with large SETs
-      const MAX_SET_SIZE = 1000;
       if (pdas.length > MAX_SET_SIZE) {
         errorLog(`SET too large for owner ${owner}`, { positionCount: pdas.length, maxAllowed: MAX_SET_SIZE });
         return error(res, 503, "Too many positions - ZSET index not ready. Please retry in a few seconds.");
       }
 
       // Log warning for large SET fallbacks
-      if (pdas.length > 100) {
+      if (pdas.length > SET_WARNING_THRESHOLD) {
         errorLog(`Large SET fallback for owner ${owner}`, { positionCount: pdas.length, severity: "warning" });
       }
     }
@@ -109,7 +109,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     logRequest("GET", "/api/positions", 200, Date.now() - start);
     return json(res, 200, body, etag, cfg.cacheTtl);
   } catch (err) {
-    errorLog("Positions query failed", { query: req.query, err });
+    const queryError = err instanceof Error ? err : new Error(String(err));
+    errorLog("Positions query failed", { query: req.query, error: queryError });
     logRequest("GET", "/api/positions", 500, Date.now() - start);
     return error(res, 500, "Internal server error");
   }
