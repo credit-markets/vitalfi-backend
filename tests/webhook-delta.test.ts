@@ -28,13 +28,18 @@ describe("Webhook delta calculations", () => {
     });
 
     it("should handle first deposit on existing vault (no previous state)", () => {
-      const oldVault = undefined;
-      const newVault = {
+      type VaultState = {
+        totalDeposited: bigint;
+        totalClaimed: bigint;
+      };
+      const oldVault: VaultState | undefined = undefined;
+      const newVault: VaultState = {
         totalDeposited: 1000n,
         totalClaimed: 0n,
       };
 
-      const action = "deposit";
+      type Action = "deposit" | "initializeVault" | "claim";
+      const action: Action = "deposit";
 
       // When no previous state, use total deposited
       let amount: string | undefined;
@@ -48,16 +53,25 @@ describe("Webhook delta calculations", () => {
     });
 
     it("should handle initializeVault with initial deposit", () => {
-      const oldVault = undefined;
-      const newVault = {
+      type VaultState = {
+        totalDeposited: bigint;
+        totalClaimed: bigint;
+      };
+      const oldVault: VaultState | undefined = undefined;
+      const newVault: VaultState = {
         totalDeposited: 5000n,
         totalClaimed: 0n,
       };
 
-      const action = "initializeVault";
+      type Action = "deposit" | "initializeVault" | "claim";
+      const action: Action = "initializeVault";
+
+      // Check if action is a deposit type action
+      const depositActions: Action[] = ["deposit", "initializeVault"];
+      const isDepositAction = depositActions.includes(action);
 
       let amount: string | undefined;
-      if (!oldVault && (action === "deposit" || action === "initializeVault")) {
+      if (!oldVault && isDepositAction) {
         if (newVault.totalDeposited > 0n) {
           amount = newVault.totalDeposited.toString();
         }
@@ -175,7 +189,7 @@ describe("Webhook delta calculations", () => {
         claimed: 0n,
       };
 
-      const action = "deposit";
+      const action: string = "deposit";
 
       let amount: string | undefined;
       if (!oldPosition && action === "deposit") {
@@ -275,7 +289,7 @@ describe("Webhook delta calculations", () => {
 
   describe("Action type handling", () => {
     it("should capture amount for deposit action", () => {
-      const action = "deposit";
+      const action: string = "deposit";
       const oldDeposited = 1000n;
       const newDeposited = 1500n;
 
@@ -291,7 +305,7 @@ describe("Webhook delta calculations", () => {
     });
 
     it("should capture amount for initializeVault action", () => {
-      const action = "initializeVault";
+      const action: string = "initializeVault";
       const oldDeposited = 0n;
       const newDeposited = 10000n;
 
@@ -307,7 +321,7 @@ describe("Webhook delta calculations", () => {
     });
 
     it("should capture amount for claim action", () => {
-      const action = "claim";
+      const action: string = "claim";
       const oldClaimed = 2000n;
       const newClaimed = 4000n;
 
@@ -323,7 +337,7 @@ describe("Webhook delta calculations", () => {
     });
 
     it("should not capture amount for other actions", () => {
-      const action = "funding_finalized";
+      const action: string = "funding_finalized";
       const oldDeposited = 1000n;
       const newDeposited = 1000n;
 

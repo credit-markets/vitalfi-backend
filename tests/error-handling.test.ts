@@ -88,7 +88,8 @@ describe("Error handling paths", () => {
     });
 
     it("should handle BigInt conversion errors", () => {
-      expect(() => BigInt("not-a-number")).toThrow();
+      const invalidInput = "not-a-number";
+      expect(() => BigInt(invalidInput)).toThrow();
     });
 
     it("should convert valid BigInt strings", () => {
@@ -115,7 +116,7 @@ describe("Error handling paths", () => {
     });
 
     it("should convert unknown errors to Error instances", () => {
-      const unknownError = "string error";
+      const unknownError: unknown = "string error";
       const error = unknownError instanceof Error
         ? unknownError
         : new Error(String(unknownError));
@@ -281,8 +282,8 @@ describe("Error handling paths", () => {
     });
 
     it("should require exact token match", () => {
-      const token = "token123";
-      const expectedSecret = "token456";
+      const token: string = "token123";
+      const expectedSecret: string = "token456";
 
       const isMatch = token === expectedSecret;
 
@@ -321,12 +322,21 @@ describe("Error handling paths", () => {
     });
 
     it("should handle status change without old status", () => {
-      const oldVault = undefined;
-      const newVault = { status: "Active" };
+      interface Vault {
+        status: string;
+      }
+      const oldVault: Vault | null = null;
+      const newVault: Vault = { status: "Active" };
 
-      const statusChanged = oldVault && oldVault.status !== newVault.status;
+      // When oldVault is null, status has not changed
+      // Use a function to help TypeScript with type narrowing
+      function hasStatusChanged(oldV: Vault | null, newV: Vault): boolean {
+        return oldV !== null && oldV.status !== newV.status;
+      }
 
-      expect(statusChanged).toBeFalsy();
+      const statusChanged = hasStatusChanged(oldVault, newVault);
+
+      expect(statusChanged).toBe(false);
     });
   });
 
