@@ -8,6 +8,7 @@ import { PublicKey } from "@solana/web3.js";
 import type { DecodedVault, DecodedPosition } from "./anchor.js";
 import type { VaultDTO, PositionDTO, ActivityDTO, VaultStatus, ActivityType } from "../types/dto.js";
 import { cfg } from "./env.js";
+import { errorLog } from "./logger.js";
 
 /**
  * Derive Vault Token Account PDA
@@ -125,8 +126,7 @@ export function toActivityDTO(
   const type = ACTION_TYPE_MAP[action];
 
   if (!type) {
-    console.warn(`Unknown action type: ${action}, defaulting to vault_created`);
-    // Fallback to vault_created for unknown actions
+    errorLog("Unknown action type in activity", { action, fallback: "vault_created" });
   }
 
   const blockTimeEpoch = context.blockTime;

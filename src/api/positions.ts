@@ -12,13 +12,13 @@ import { kOwnerPositions, kOwnerPositionsByUpdated, kPositionJson } from "../lib
 import { createEtag } from "../lib/etag.js";
 import { cfg } from "../lib/env.js";
 import { logRequest, errorLog } from "../lib/logger.js";
-import { isValidPubkey } from "../lib/validation.js";
+import { isValidPubkey, cursorSchema } from "../lib/validation.js";
 import { MAX_SET_SIZE, SET_WARNING_THRESHOLD } from "../lib/constants.js";
 import type { PositionDTO } from "../types/dto.js";
 
 const QuerySchema = z.object({
   owner: z.string().min(32).max(44).refine(isValidPubkey, "Invalid Base58 public key"),
-  cursor: z.coerce.number().int().positive().max(Math.floor(Date.now() / 1000) + 7 * 86400).optional(),
+  cursor: cursorSchema,
   limit: z.coerce.number().min(1).max(100).default(50),
 });
 
@@ -73,9 +73,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return getJSON<PositionDTO>(key);
     });
 
-    const positions = (await Promise.all(pipeline)).filter(
-      (p): p is PositionDTO => p !== null
-    );
+    const results = await Promise.all(pipeline);
+    const positions: PositionDTO[] = [];
+    results.forEach((p, i) => {
+      if (p === null) {
+        errorLog("Position JSON missing for indexed PDA", { pda: pdas[i], owner });
+      } else {
+        positions.push(p);
+      }
+    });
 
     // Sort by updatedAtEpoch DESC (most recent first)
     positions.sort((a, b) => b.updatedAtEpoch - a.updatedAtEpoch);

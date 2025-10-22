@@ -13,13 +13,13 @@ import { kVaultActivity, kOwnerActivity } from "../lib/keys.js";
 import { createEtag } from "../lib/etag.js";
 import { cfg } from "../lib/env.js";
 import { logRequest, errorLog } from "../lib/logger.js";
-import { isValidPubkey } from "../lib/validation.js";
+import { isValidPubkey, cursorSchema } from "../lib/validation.js";
 import type { ActivityDTO } from "../types/dto.js";
 
 const QuerySchema = z.object({
   vault: z.string().min(32).max(44).refine(isValidPubkey, "Invalid Base58 public key").optional(),
   owner: z.string().min(32).max(44).refine(isValidPubkey, "Invalid Base58 public key").optional(),
-  cursor: z.coerce.number().int().positive().max(Math.floor(Date.now() / 1000) + 7 * 86400).optional(), // Unix epoch seconds
+  cursor: cursorSchema,
   limit: z.coerce.number().min(1).max(100).default(50),
 }).refine((data) => data.vault || data.owner, {
   message: "Either vault or owner must be provided",

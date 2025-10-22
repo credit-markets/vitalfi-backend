@@ -12,14 +12,14 @@ import { kAuthorityVaults, kAuthorityVaultsByUpdated, kVaultJson } from "../lib/
 import { createEtag } from "../lib/etag.js";
 import { cfg } from "../lib/env.js";
 import { logRequest, errorLog } from "../lib/logger.js";
-import { isValidPubkey } from "../lib/validation.js";
+import { isValidPubkey, cursorSchema } from "../lib/validation.js";
 import { MAX_SET_SIZE, SET_WARNING_THRESHOLD } from "../lib/constants.js";
 import type { VaultDTO } from "../types/dto.js";
 
 const QuerySchema = z.object({
   authority: z.string().min(32).max(44).refine(isValidPubkey, "Invalid Base58 public key"),
   status: z.enum(["Funding", "Active", "Matured", "Canceled"]).optional(),
-  cursor: z.coerce.number().int().positive().max(Math.floor(Date.now() / 1000) + 7 * 86400).optional(), // Allow 1 week future for clock skew/test data
+  cursor: cursorSchema,
   limit: z.coerce.number().min(1).max(100).default(50),
 });
 
@@ -81,9 +81,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return getJSON<VaultDTO>(key);
     });
 
-    const vaults = (await Promise.all(pipeline)).filter(
-      (v): v is VaultDTO => v !== null
-    );
+    const results = await Promise.all(pipeline);
+    const vaults: VaultDTO[] = [];
+    results.forEach((v, i) => {
+      if (v === null) {
+        errorLog("Vault JSON missing for indexed PDA", { pda: pdas[i], authority });
+      } else {
+        vaults.push(v);
+      }
+    });
 
     // Only filter by status if using SET fallback (ZSET already filtered by status)
     const filtered = (usedZset || !status)

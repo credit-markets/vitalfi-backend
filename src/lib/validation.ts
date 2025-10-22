@@ -4,6 +4,9 @@
  * Input validation utilities for API endpoints.
  */
 
+import { z } from "zod";
+import { getMaxCursorValue } from "./constants.js";
+
 /**
  * Base58 character set used by Solana public keys
  */
@@ -17,7 +20,18 @@ export function isValidPubkey(pubkey: string): boolean {
   if (pubkey.length < 32 || pubkey.length > 44) {
     return false;
   }
-  
+
   // Check if it only contains Base58 characters
   return BASE58_REGEX.test(pubkey);
 }
+
+/**
+ * Shared cursor validation schema
+ * Validates Unix epoch seconds with optional future allowance for clock skew/test data
+ */
+export const cursorSchema = z.coerce
+  .number()
+  .int()
+  .positive()
+  .max(getMaxCursorValue(), "Cursor value too far in the future")
+  .optional();

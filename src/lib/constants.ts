@@ -27,3 +27,16 @@ export const SET_WARNING_THRESHOLD = 100;
  * Prevents DoS attacks via large payloads
  */
 export const MAX_WEBHOOK_PAYLOAD_SIZE = 5 * 1024 * 1024; // 5MB
+
+/**
+ * Maximum future cursor value allowance in days
+ * Allows cursors up to 7 days in the future for clock skew/test data
+ */
+export const MAX_FUTURE_CURSOR_DAYS = 7;
+
+/**
+ * Helper to get maximum cursor value (current time + allowance)
+ */
+export function getMaxCursorValue(): number {
+  return Math.floor(Date.now() / 1000) + (MAX_FUTURE_CURSOR_DAYS * 86400);
+}
