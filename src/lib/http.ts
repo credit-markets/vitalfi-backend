@@ -19,6 +19,11 @@ export function json(
   res.status(status);
   res.setHeader("Content-Type", "application/json");
 
+  // CORS headers - allow all origins for public API
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, If-None-Match");
+
   if (etag) {
     res.setHeader("ETag", etag);
   }
@@ -47,4 +52,15 @@ export function error(
     body.details = details;
   }
   return json(res, status, body);
+}
+
+/**
+ * Handle CORS preflight OPTIONS requests
+ */
+export function handleCors(res: VercelResponse): VercelResponse {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, If-None-Match");
+  res.setHeader("Access-Control-Max-Age", "86400"); // 24 hours
+  return res.status(200).end();
 }

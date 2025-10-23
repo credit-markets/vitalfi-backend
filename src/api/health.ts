@@ -6,13 +6,18 @@
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { kv } from "../lib/kv.js";
-import { json } from "../lib/http.js";
+import { json, handleCors } from "../lib/http.js";
 import { logRequest } from "../lib/logger.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const start = Date.now();
 
   try {
+    // Handle CORS preflight
+    if (req.method === "OPTIONS") {
+      return handleCors(res);
+    }
+
     if (req.method !== "GET") {
       return res.status(405).json({ error: "Method not allowed" });
     }

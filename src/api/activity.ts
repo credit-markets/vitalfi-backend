@@ -8,7 +8,7 @@
 import type { VercelRequest, VercelResponse} from "@vercel/node";
 import { z } from "zod";
 import { zrevrangebyscore, getJSON } from "../lib/kv.js";
-import { json, error } from "../lib/http.js";
+import { json, error, handleCors } from "../lib/http.js";
 import { kVaultActivity, kOwnerActivity } from "../lib/keys.js";
 import { createEtag } from "../lib/etag.js";
 import { cfg } from "../lib/env.js";
@@ -29,6 +29,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const start = Date.now();
 
   try {
+    // Handle CORS preflight
+    if (req.method === "OPTIONS") {
+      return handleCors(res);
+    }
+
     if (req.method !== "GET") {
       return error(res, 405, "Method not allowed");
     }
