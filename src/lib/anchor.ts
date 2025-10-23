@@ -20,24 +20,24 @@ export function getCoder(): BorshCoder {
 }
 
 /**
- * Decoded Vault account
+ * Decoded Vault account (snake_case from Anchor IDL)
  */
 export interface DecodedVault {
   version: number;
   authority: PublicKey;
-  vaultId: bigint;
-  assetMint: PublicKey;
-  vaultToken: PublicKey;
+  vault_id: bigint;
+  asset_mint: PublicKey;
+  vault_token: PublicKey;
   cap: bigint;
-  targetApyBps: number;
-  fundingEndTs: bigint;
-  maturityTs: bigint;
-  minDeposit: bigint;
+  target_apy_bps: number;
+  funding_end_ts: bigint;
+  maturity_ts: bigint;
+  min_deposit: bigint;
   status: { funding?: {}; active?: {}; canceled?: {}; matured?: {}; closed?: {} };
-  totalDeposited: bigint;
-  totalClaimed: bigint;
-  payoutNum: bigint;
-  payoutDen: bigint;
+  total_deposited: bigint;
+  total_claimed: bigint;
+  payout_num: bigint;
+  payout_den: bigint;
   bump: number;
 }
 

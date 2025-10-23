@@ -23,7 +23,7 @@ export const cfg = {
 
   // Solana
   programId: getEnv("VITALFI_PROGRAM_ID"),
-  rpc: getEnv("NEXT_PUBLIC_SOLANA_RPC_ENDPOINT", false) || "https://api.mainnet-beta.solana.com",
+  solanaRpcEndpoint: getEnv("NEXT_PUBLIC_SOLANA_RPC_ENDPOINT", false) || "https://api.devnet.solana.com",
 
   // Cache
   cacheTtl: parseInt(getEnv("CACHE_TTL", false) || "30", 10),
