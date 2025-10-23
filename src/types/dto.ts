@@ -5,7 +5,7 @@
  * All numeric types stored as strings to avoid JavaScript precision issues with u64.
  */
 
-export type VaultStatus = "Funding" | "Active" | "Matured" | "Canceled";
+export type VaultStatus = "Funding" | "Active" | "Matured" | "Canceled" | "Closed";
 
 export type VaultDTO = {
   vaultPda: string;

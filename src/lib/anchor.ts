@@ -21,6 +21,8 @@ export function getCoder(): BorshCoder {
 
 /**
  * Decoded Vault account (snake_case from Anchor IDL)
+ *
+ * Note: Anchor deserializes Rust enum variants as objects with PascalCase keys
  */
 export interface DecodedVault {
   version: number;
@@ -33,7 +35,7 @@ export interface DecodedVault {
   funding_end_ts: bigint;
   maturity_ts: bigint;
   min_deposit: bigint;
-  status: { funding?: {}; active?: {}; canceled?: {}; matured?: {}; closed?: {} };
+  status: { Funding?: {}; Active?: {}; Canceled?: {}; Matured?: {}; Closed?: {} };
   total_deposited: bigint;
   total_claimed: bigint;
   payout_num: bigint;

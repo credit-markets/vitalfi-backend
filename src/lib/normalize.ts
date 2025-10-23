@@ -24,13 +24,20 @@ function getVaultTokenAccount(vaultPda: string): string {
 
 /**
  * Map Anchor vault status enum to DTO string
+ *
+ * Anchor deserializes Rust enums as objects with PascalCase keys:
+ * { "Funding": {} }, { "Active": {} }, { "Canceled": {} }, etc.
  */
 function mapVaultStatus(status: DecodedVault["status"]): VaultStatus {
-  if ("funding" in status) return "Funding";
-  if ("active" in status) return "Active";
-  if ("canceled" in status) return "Canceled";
-  if ("matured" in status) return "Matured";
-  return "Funding"; // Default fallback
+  if ("Funding" in status) return "Funding";
+  if ("Active" in status) return "Active";
+  if ("Canceled" in status) return "Canceled";
+  if ("Matured" in status) return "Matured";
+  if ("Closed" in status) return "Closed";
+
+  // Fallback with error logging
+  errorLog("Unknown vault status", { status });
+  return "Funding";
 }
 
 /**
@@ -78,7 +85,7 @@ export function toPositionDTO(
 ): PositionDTO {
   const now = Date.now();
   const updatedAtEpoch = blockTime || Math.floor(now / 1000);
-  
+
   return {
     positionPda: pda,
     vaultPda: decoded.vault.toBase58(),
