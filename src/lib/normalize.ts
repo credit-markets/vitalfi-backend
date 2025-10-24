@@ -107,9 +107,8 @@ const ACTION_TYPE_MAP: Record<string, ActivityType> = {
   claim: "claim",
   finalizeFunding: "funding_finalized",
   matureVault: "matured",
-  cancelVault: "canceled",
   authorityWithdraw: "authority_withdraw",
-  // Note: position_created is inferred when position appears in accounts
+  closeVault: "vault_closed",
 };
 
 /**

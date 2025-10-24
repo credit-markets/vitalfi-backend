@@ -42,12 +42,11 @@ export type PositionDTO = {
 export type ActivityType =
   | "deposit"
   | "claim"
+  | "vault_created"
   | "funding_finalized"
   | "authority_withdraw"
   | "matured"
-  | "canceled"
-  | "vault_created"
-  | "position_created";
+  | "vault_closed";
 
 export type ActivityDTO = {
   id: string; // `${txSig}:${type}:${slot}`

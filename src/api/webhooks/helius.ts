@@ -352,14 +352,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             // Calculate delta based on action type
             if (action === "deposit" || action === "initializeVault") {
               const oldDeposited = BigInt(oldVault.totalDeposited || "0");
-              const newDeposited = newVault.total_deposited;
+              const newDeposited = BigInt(newVault.total_deposited);
               const delta = newDeposited - oldDeposited;
               if (delta > 0n) {
                 amount = delta.toString();
               }
             } else if (action === "claim") {
               const oldClaimed = BigInt(oldVault.totalClaimed || "0");
-              const newClaimed = newVault.total_claimed;
+              const newClaimed = BigInt(newVault.total_claimed);
               const delta = newClaimed - oldClaimed;
               if (delta > 0n) {
                 amount = delta.toString();
@@ -367,8 +367,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           } else {
             // No previous state - use current total for any deposit-like action
-            if ((action === "deposit" || action === "initializeVault") && newVault.total_deposited > 0n) {
-              amount = newVault.total_deposited.toString();
+            if ((action === "deposit" || action === "initializeVault") && BigInt(newVault.total_deposited) > 0n) {
+              amount = BigInt(newVault.total_deposited).toString();
             }
           }
         }
@@ -382,14 +382,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             // Calculate delta based on action type
             if (action === "deposit") {
               const oldDeposited = BigInt(oldPosition.deposited || "0");
-              const newDeposited = newPosition.deposited;
+              const newDeposited = BigInt(newPosition.deposited);
               const delta = newDeposited - oldDeposited;
               if (delta > 0n) {
                 amount = delta.toString();
               }
             } else if (action === "claim") {
               const oldClaimed = BigInt(oldPosition.claimed || "0");
-              const newClaimed = newPosition.claimed;
+              const newClaimed = BigInt(newPosition.claimed);
               const delta = newClaimed - oldClaimed;
               if (delta > 0n) {
                 amount = delta.toString();
@@ -397,8 +397,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           } else {
             // No previous state - use total for first deposit
-            if (action === "deposit" && newPosition.deposited > 0n) {
-              amount = newPosition.deposited.toString();
+            if (action === "deposit" && BigInt(newPosition.deposited) > 0n) {
+              amount = BigInt(newPosition.deposited).toString();
             }
           }
         }
