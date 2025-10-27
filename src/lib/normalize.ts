@@ -125,7 +125,7 @@ export function toActivityDTO(
     authority?: string;
     owner?: string;
     amount?: string;
-    assetMint?: string;
+    assetMint?: string | null;
   }
 ): ActivityDTO {
   // Map action names to ActivityType with fallback logging

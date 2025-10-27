@@ -11,7 +11,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { timingSafeEqual } from "crypto";
 import { PublicKey } from "@solana/web3.js";
 import { json, error } from "../../lib/http.js";
-import { verifyHeliusSignature, extractActionsFromLogs, decodeAccounts } from "../../lib/helius.js";
+import { extractActionsFromLogs, decodeAccounts } from "../../lib/helius.js";
 import { getCoder } from "../../lib/anchor.js";
 import { toVaultDTO, toPositionDTO, toActivityDTO } from "../../lib/normalize.js";
 import { setJSON, sadd, zadd, zrem, setnx, batchOperations, getJSON } from "../../lib/kv.js";
@@ -84,16 +84,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       throw err;
     }
 
-    // Verify HMAC signature from Helius webhook
-    const signature = req.headers["x-helius-signature"] as string | undefined;
-    if (!signature) {
-      errorLog("Missing X-Helius-Signature header in webhook request");
-      return error(res, 401, "Missing signature");
-    }
-
-    if (!verifyHeliusSignature(signature, rawBody)) {
-      errorLog("Invalid HMAC signature in webhook request");
-      return error(res, 401, "Invalid signature");
+    // Verify token from Authorization header (Helius raw webhooks use shared secret)
+    const token = req.headers.authorization as string | undefined;
+    if (!token || token !== cfg.heliusSecret) {
+      errorLog("Invalid or missing authentication token in webhook request");
+      return error(res, 401, "Invalid token");
     }
 
     // Parse JSON payload
@@ -375,13 +370,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         // Extract amount from account deltas
         let amount: string | undefined;
-        let assetMint: string | undefined;
+        let assetMint: string | null | undefined;
 
         if (vaultItem?.type === "vault") {
           const newVault = vaultItem.data as import("../../lib/anchor.js").DecodedVault;
           // Check for default PublicKey (null mint) like normalize.ts does
           assetMint = newVault.asset_mint.equals(PublicKey.default)
-            ? undefined
+            ? null
             : newVault.asset_mint.toBase58();
 
           const oldVault = oldVaults.get(vaultItem.pda);
