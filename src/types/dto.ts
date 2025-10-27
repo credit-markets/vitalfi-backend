@@ -5,7 +5,7 @@
  * All numeric types stored as strings to avoid JavaScript precision issues with u64.
  */
 
-export type VaultStatus = "Funding" | "Active" | "Matured" | "Canceled";
+export type VaultStatus = "Funding" | "Active" | "Matured" | "Canceled" | "Closed";
 
 export type VaultDTO = {
   vaultPda: string;
@@ -42,12 +42,11 @@ export type PositionDTO = {
 export type ActivityType =
   | "deposit"
   | "claim"
+  | "vault_created"
   | "funding_finalized"
   | "authority_withdraw"
   | "matured"
-  | "canceled"
-  | "vault_created"
-  | "position_created";
+  | "vault_closed";
 
 export type ActivityDTO = {
   id: string; // `${txSig}:${type}:${slot}`

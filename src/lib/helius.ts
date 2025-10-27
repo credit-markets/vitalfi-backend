@@ -5,9 +5,9 @@
  */
 
 import { createHmac, timingSafeEqual } from "crypto";
-import { PublicKey } from "@solana/web3.js";
 import { getCoder, type DecodedVault, type DecodedPosition } from "./anchor.js";
-import type { HeliusWebhookPayload, HeliusAccountData } from "../types/helius.js";
+import type { RawWebhookPayload } from "../types/helius.js";
+import type { AccountInfo } from "./solana.js";
 import { cfg } from "./env.js";
 
 /**
@@ -38,7 +38,7 @@ export function verifyHeliusSignature(signature: string, rawBody: string): boole
 /**
  * Extract instruction names from Anchor logs
  */
-export function extractActionsFromLogs(payload: HeliusWebhookPayload): string[] {
+export function extractActionsFromLogs(payload: RawWebhookPayload): string[] {
   const logs = payload.meta?.logMessages || [];
   const actions: string[] = [];
 
@@ -63,11 +63,11 @@ export function extractActionsFromLogs(payload: HeliusWebhookPayload): string[] 
 }
 
 /**
- * Decode account data from Helius webhook
+ * Decode account data fetched from RPC
  */
 export function decodeAccounts(
   coder: ReturnType<typeof getCoder>,
-  accountData: HeliusAccountData[]
+  accountInfos: AccountInfo[]
 ): Array<{
   type: "vault" | "position";
   pda: string;
@@ -79,37 +79,32 @@ export function decodeAccounts(
     data: DecodedVault | DecodedPosition;
   }> = [];
 
-  for (const item of accountData) {
-    // Only process accounts owned by VitalFi program
-    if (item.owner !== cfg.programId) {
-      continue;
-    }
+  for (const info of accountInfos) {
+    const buffer = Buffer.from(info.data, "base64");
 
-    const buffer = Buffer.from(item.data, "base64");
-
-    // Try decoding as Vault
+    // Try decoding as Vault (capitalized - matches IDL)
     try {
-      const decoded = coder.accounts.decode("vault", buffer);
+      const decoded = coder.accounts.decode("Vault", buffer);
       results.push({
         type: "vault",
-        pda: item.account,
+        pda: info.pubkey,
         data: decoded as DecodedVault,
       });
       continue;
     } catch {
-      // Not a vault, try position
+      // Try Position next
     }
 
-    // Try decoding as Position
+    // Try decoding as Position (capitalized - matches IDL)
     try {
-      const decoded = coder.accounts.decode("position", buffer);
+      const decoded = coder.accounts.decode("Position", buffer);
       results.push({
         type: "position",
-        pda: item.account,
+        pda: info.pubkey,
         data: decoded as DecodedPosition,
       });
     } catch {
-      // Not a position either, skip
+      // Not a vault or position account
     }
   }
 

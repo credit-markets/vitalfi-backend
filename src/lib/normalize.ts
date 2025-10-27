@@ -24,13 +24,20 @@ function getVaultTokenAccount(vaultPda: string): string {
 
 /**
  * Map Anchor vault status enum to DTO string
+ *
+ * Anchor deserializes Rust enums as objects with PascalCase keys:
+ * { "Funding": {} }, { "Active": {} }, { "Canceled": {} }, etc.
  */
 function mapVaultStatus(status: DecodedVault["status"]): VaultStatus {
-  if ("funding" in status) return "Funding";
-  if ("active" in status) return "Active";
-  if ("canceled" in status) return "Canceled";
-  if ("matured" in status) return "Matured";
-  return "Funding"; // Default fallback
+  if ("Funding" in status) return "Funding";
+  if ("Active" in status) return "Active";
+  if ("Canceled" in status) return "Canceled";
+  if ("Matured" in status) return "Matured";
+  if ("Closed" in status) return "Closed";
+
+  // Fallback with error logging
+  errorLog("Unknown vault status", { status });
+  return "Funding";
 }
 
 /**
@@ -49,18 +56,18 @@ export function toVaultDTO(
     vaultPda: pda,
     vaultTokenAccount: getVaultTokenAccount(pda),
     authority: decoded.authority.toBase58(),
-    vaultId: decoded.vaultId.toString(),
-    assetMint: decoded.assetMint.toBase58(),
+    vaultId: decoded.vault_id.toString(),
+    assetMint: decoded.asset_mint.equals(PublicKey.default) ? null : decoded.asset_mint.toBase58(),
     status: mapVaultStatus(decoded.status),
     cap: decoded.cap.toString(),
-    totalDeposited: decoded.totalDeposited.toString(),
-    totalClaimed: decoded.totalClaimed.toString(),
-    targetApyBps: decoded.targetApyBps,
-    minDeposit: decoded.minDeposit.toString(),
-    fundingEndTs: decoded.fundingEndTs.toString(),
-    maturityTs: decoded.maturityTs.toString(),
-    payoutNum: decoded.payoutNum.toString(),
-    payoutDen: decoded.payoutDen.toString(),
+    totalDeposited: decoded.total_deposited.toString(),
+    totalClaimed: decoded.total_claimed.toString(),
+    targetApyBps: decoded.target_apy_bps,
+    minDeposit: decoded.min_deposit.toString(),
+    fundingEndTs: decoded.funding_end_ts.toString(),
+    maturityTs: decoded.maturity_ts.toString(),
+    payoutNum: decoded.payout_num.toString(),
+    payoutDen: decoded.payout_den.toString(),
     slot,
     updatedAt: new Date(updatedAtEpoch * 1000).toISOString(),
     updatedAtEpoch,
@@ -78,7 +85,7 @@ export function toPositionDTO(
 ): PositionDTO {
   const now = Date.now();
   const updatedAtEpoch = blockTime || Math.floor(now / 1000);
-  
+
   return {
     positionPda: pda,
     vaultPda: decoded.vault.toBase58(),
@@ -100,9 +107,8 @@ const ACTION_TYPE_MAP: Record<string, ActivityType> = {
   claim: "claim",
   finalizeFunding: "funding_finalized",
   matureVault: "matured",
-  cancelVault: "canceled",
   authorityWithdraw: "authority_withdraw",
-  // Note: position_created is inferred when position appears in accounts
+  closeVault: "vault_closed",
 };
 
 /**
@@ -119,7 +125,7 @@ export function toActivityDTO(
     authority?: string;
     owner?: string;
     amount?: string;
-    assetMint?: string;
+    assetMint?: string | null;
   }
 ): ActivityDTO {
   // Map action names to ActivityType with fallback logging
