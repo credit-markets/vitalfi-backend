@@ -9,6 +9,7 @@
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { timingSafeEqual } from "crypto";
+import { PublicKey } from "@solana/web3.js";
 import { json, error } from "../../lib/http.js";
 import { verifyHeliusSignature, extractActionsFromLogs, decodeAccounts } from "../../lib/helius.js";
 import { getCoder } from "../../lib/anchor.js";
@@ -83,11 +84,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       throw err;
     }
 
-    // Verify token from Authorization header (Helius uses shared secret instead of HMAC)
-    const token = req.headers.authorization as string | undefined;
-    if (!token || token !== cfg.heliusSecret) {
-      errorLog("Invalid or missing authentication token in webhook request");
-      return error(res, 401, "Invalid token");
+    // Verify HMAC signature from Helius webhook
+    const signature = req.headers["x-helius-signature"] as string | undefined;
+    if (!signature) {
+      errorLog("Missing X-Helius-Signature header in webhook request");
+      return error(res, 401, "Missing signature");
+    }
+
+    if (!verifyHeliusSignature(signature, rawBody)) {
+      errorLog("Invalid HMAC signature in webhook request");
+      return error(res, 401, "Invalid signature");
     }
 
     // Parse JSON payload
@@ -146,17 +152,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const keys = item.transaction?.message?.accountKeys ?? [];
       const accountKeys = keys.map((k: any) => typeof k === "string" ? k : k?.pubkey).filter(Boolean);
 
-      // Debug: show first few keys
-      info("Processing transaction", {
-        signature,
-        slot,
-        accountKeys: accountKeys.length,
-        first2Keys: accountKeys.slice(0, 2)
-      });
-
-      // Debug: log RPC endpoint being used
-      info("RPC endpoint", { endpoint: cfg.solanaRpcEndpoint });
-
       // Sanity check: verify transaction exists on this cluster
       try {
         const txCheck = await fetch(cfg.solanaRpcEndpoint, {
@@ -171,64 +166,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
         const txResult = await txCheck.json();
         if (!txResult.result) {
-          info("Transaction NOT found on current RPC - cluster mismatch!", {
+          errorLog("Transaction NOT found on current RPC - cluster mismatch", {
             signature,
             rpcEndpoint: cfg.solanaRpcEndpoint
           });
           continue; // Skip this transaction
         }
-        info("Transaction confirmed on cluster", { signature: signature.slice(0, 8) + "..." });
       } catch (err) {
-        info("Error checking transaction", { error: String(err) });
+        errorLog("Error checking transaction", { signature, error: String(err) });
       }
 
       // Fetch latest base64 account data (raw payloads don't include it)
       // Use 3 retries with per-key fallback for devnet visibility lag
       const infos = await getMultipleAccounts(accountKeys, { retries: 3 });
 
-      const nullAccounts = accountKeys.filter((_: string, i: number) => infos[i] === null);
-      info("Fetched accounts from RPC", {
-        total: infos.length,
-        nonNull: infos.filter(i => i !== null).length,
-        stillNull: nullAccounts.length > 0 ? nullAccounts : undefined,
-      });
-
-      const accountOwners = infos.filter(i => i !== null).map(i => i!.owner);
-      const programOwned = infos.filter(i => i !== null && i.owner === cfg.programId);
-
-      if (programOwned.length > 0) {
-        info("Program-owned accounts before filter", {
-          count: programOwned.length,
-          pubkeys: programOwned.map(a => a!.pubkey),
-          dataShapes: programOwned.map(a => Array.isArray(a!.data) ? "tuple" : typeof a!.data),
-          dataLengths: programOwned.map(a => a!.data.length)
-        });
-      } else {
-        info("No program-owned accounts found", {
-          allOwners: [...new Set(accountOwners)],
-          expectedProgram: cfg.programId
-        });
-      }
-
       const programAccounts = filterProgramAccounts(infos, cfg.programId);
 
-      info("After filterProgramAccounts", {
-        programAccountsCount: programAccounts.length,
-        beforeFilter: programOwned.length,
-      });
-
+      // Skip if no program accounts found (not our transaction)
       if (programAccounts.length === 0) {
-        // Debug: why were they filtered out?
-        if (programOwned.length > 0) {
-          info("Program-owned accounts filtered out", {
-            reasons: programOwned.map(a => ({
-              pubkey: a!.pubkey.slice(0, 8),
-              executable: a!.executable,
-              dataLength: a!.data.length,
-              ownerMatch: a!.owner === cfg.programId
-            }))
-          });
-        }
+        continue;
       }
 
       const decoded = programAccounts.length ? decodeAccounts(coder, programAccounts) : [];
@@ -241,18 +197,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Handle closeVault: Anchor's close constraint deletes the account,
       // so we update vault status in Redis from the cached data
       if (actions.includes("closeVault") && decoded.length === 0) {
-        info("Detected closeVault action with deleted account", { signature });
-
         // The deleted vault PDA should be in the null accounts
         const potentialVaultKeys = accountKeys.filter((_: string, i: number) => infos[i] === null);
 
         for (const vaultPda of potentialVaultKeys) {
           const existing = await getJSON<import("../../types/dto.js").VaultDTO>(kVaultJson(vaultPda));
           if (existing && (existing.status === "Canceled" || existing.status === "Matured")) {
-            info("Updating closed vault status in Redis", {
-              vaultPda: vaultPda.slice(0, 8),
-              oldStatus: existing.status
-            });
 
             // Update vault status to Closed
             const closedVault: import("../../types/dto.js").VaultDTO = {
@@ -305,15 +255,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         continue;
       }
 
-      info("After decoding", {
-        decodedCount: decoded.length,
-        programAccountsCount: programAccounts.length,
-        decodedTypes: decoded.map(d => d.type),
-        firstDecodedKeys: decoded.length > 0 ? Object.keys(decoded[0].data).slice(0, 10) : []
-      });
-
       if (decoded.length === 0) {
-        info("No program accounts found in transaction", { signature });
         continue;
       }
 
@@ -356,6 +298,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           // Get existing vault from pre-fetched map
           const existingVault = oldVaults.get(decodedItem.pda);
 
+          // Prevent race condition: only update if this is newer data (higher slot)
+          // If existing vault has a newer slot, skip this update to avoid overwriting with stale data
+          if (existingVault && existingVault.slot !== null && dto.slot !== null) {
+            if (dto.slot < existingVault.slot) {
+              // This update is stale (older slot), skip it
+              info("Skipping stale vault update", {
+                pda: decodedItem.pda,
+                currentSlot: existingVault.slot,
+                incomingSlot: dto.slot
+              });
+              continue; // Skip to next account
+            }
+          }
+
           // Batch all vault operations including ZSET for ordering
           // Also write to per-status ZSET for efficient filtered queries
           const vaultOps: Promise<unknown>[] = [
@@ -379,6 +335,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } else if (decodedItem.type === "position") {
           const positionData = decodedItem.data as import("../../lib/anchor.js").DecodedPosition;
           const dto = toPositionDTO(decodedItem.pda, positionData, slot, blockTime);
+
+          // Get existing position from pre-fetched map
+          const existingPosition = oldPositions.get(decodedItem.pda);
+
+          // Prevent race condition: only update if this is newer data (higher slot)
+          if (existingPosition && existingPosition.slot !== null && dto.slot !== null) {
+            if (dto.slot < existingPosition.slot) {
+              // This update is stale (older slot), skip it
+              info("Skipping stale position update", {
+                pda: decodedItem.pda,
+                currentSlot: existingPosition.slot,
+                incomingSlot: dto.slot
+              });
+              continue; // Skip to next account
+            }
+          }
 
           // Batch all position operations including ZSET for ordering
           accountOperations.push(
@@ -407,7 +379,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (vaultItem?.type === "vault") {
           const newVault = vaultItem.data as import("../../lib/anchor.js").DecodedVault;
-          assetMint = newVault.asset_mint.toBase58();
+          // Check for default PublicKey (null mint) like normalize.ts does
+          assetMint = newVault.asset_mint.equals(PublicKey.default)
+            ? undefined
+            : newVault.asset_mint.toBase58();
 
           const oldVault = oldVaults.get(vaultItem.pda);
 
