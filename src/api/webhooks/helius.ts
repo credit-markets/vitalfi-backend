@@ -239,6 +239,77 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const decoded = programAccounts.length ? decodeAccounts(coder, programAccounts) : [];
 
+      // Extract actions from logs before checking decoded accounts
+      // This is needed to handle closeVault which deletes the account
+      const logMessages: string[] = item.meta?.logMessages ?? [];
+      const actions = extractActionsFromLogs({ meta: { logMessages }, signature, slot, blockTime } as any);
+
+      // Handle closeVault specially: account is deleted on-chain but we need to update Redis status
+      if (actions.includes("closeVault") && decoded.length === 0) {
+        info("Detected closeVault action with deleted account", { signature });
+
+        // The deleted vault PDA should be in the null accounts
+        const potentialVaultKeys = accountKeys.filter((_: string, i: number) => infos[i] === null);
+
+        for (const vaultPda of potentialVaultKeys) {
+          const existing = await getJSON<import("../../types/dto.js").VaultDTO>(kVaultJson(vaultPda));
+          if (existing && (existing.status === "Canceled" || existing.status === "Matured")) {
+            info("Updating closed vault status in Redis", {
+              vaultPda: vaultPda.slice(0, 8),
+              oldStatus: existing.status
+            });
+
+            // Update vault status to Closed
+            const closedVault: import("../../types/dto.js").VaultDTO = {
+              ...existing,
+              status: "Closed",
+              slot,
+              updatedAt: blockTime ? new Date(blockTime * 1000).toISOString() : new Date().toISOString(),
+              updatedAtEpoch: blockTime ?? Math.floor(Date.now() / 1000),
+            };
+
+            // Update in Redis with proper indexing
+            await Promise.all([
+              setJSON(kVaultJson(vaultPda), closedVault),
+              zadd(kAuthorityVaultsByUpdated(closedVault.authority), closedVault.updatedAtEpoch, vaultPda),
+              zadd(kAuthorityVaultsByUpdated(closedVault.authority, "Closed"), closedVault.updatedAtEpoch, vaultPda),
+              // Remove from old status ZSET
+              zrem(kAuthorityVaultsByUpdated(closedVault.authority, existing.status), vaultPda),
+            ]);
+
+            // Create activity event for vault closure
+            const activityDto = toActivityDTO("closeVault", {
+              txSig: signature,
+              slot: slot,
+              blockTime: blockTime,
+              vaultPda: vaultPda,
+              positionPda: undefined,
+              authority: closedVault.authority,
+              owner: undefined,
+              amount: undefined,
+              assetMint: closedVault.assetMint || undefined,
+            });
+
+            const activityKey = kActivity(signature, activityDto.type, slot);
+            const activityTtlSeconds = cfg.activityTtlDays * 24 * 3600;
+            const wasNew = await setnx(activityKey, activityDto, { ex: activityTtlSeconds });
+
+            if (wasNew === 1) {
+              const score = activityDto.blockTimeEpoch || slot;
+              if (activityDto.vaultPda) {
+                await zadd(kVaultActivity(activityDto.vaultPda), score, activityKey);
+              }
+              activitiesProcessed++;
+            }
+
+            vaultsProcessed++;
+          }
+        }
+
+        // Skip to next transaction after handling close
+        continue;
+      }
+
       info("After decoding", {
         decodedCount: decoded.length,
         programAccountsCount: programAccounts.length,
@@ -328,11 +399,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Execute all account operations in parallel
       await batchOperations(() => accountOperations);
 
-      // Extract actions from logs
-      const logMessages: string[] = item.meta?.logMessages ?? [];
-      const actions = extractActionsFromLogs({ meta: { logMessages }, signature, slot, blockTime } as any);
-
       // Create activity events
+      // Note: actions and logMessages were already extracted earlier for closeVault handling
       for (const action of actions) {
         // Try to find associated vault/position from decoded accounts
         const vaultItem = decoded.find((d) => d.type === "vault");
