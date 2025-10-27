@@ -57,7 +57,7 @@ export function toVaultDTO(
     vaultTokenAccount: getVaultTokenAccount(pda),
     authority: decoded.authority.toBase58(),
     vaultId: decoded.vault_id.toString(),
-    assetMint: decoded.asset_mint.toBase58(),
+    assetMint: decoded.asset_mint.equals(PublicKey.default) ? null : decoded.asset_mint.toBase58(),
     status: mapVaultStatus(decoded.status),
     cap: decoded.cap.toString(),
     totalDeposited: decoded.total_deposited.toString(),

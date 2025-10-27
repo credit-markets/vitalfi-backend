@@ -83,15 +83,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       throw err;
     }
 
-    // Verify token from Authorization header (Helius raw webhooks)
+    // Verify token from Authorization header (Helius uses shared secret instead of HMAC)
     const token = req.headers.authorization as string | undefined;
     if (!token || token !== cfg.heliusSecret) {
       errorLog("Invalid or missing authentication token in webhook request");
       return error(res, 401, "Invalid token");
     }
-
-    // Debug: log auth confirmation
-    info("Auth OK", { authLen: token.length });
 
     // Parse JSON payload
     let body: unknown;
@@ -102,9 +99,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       errorLog("Failed to parse webhook payload", parseError);
       return error(res, 400, "Invalid JSON payload");
     }
-
-    // Debug: log body peek
-    info("Body peek", { len: rawBody.length, head: rawBody.slice(0, 80) });
 
     // Helius sends arrays of transactions (or test pings as [0])
     if (Array.isArray(body) && body.length === 1 && typeof body[0] === "number") {
@@ -244,7 +238,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const logMessages: string[] = item.meta?.logMessages ?? [];
       const actions = extractActionsFromLogs({ meta: { logMessages }, signature, slot, blockTime } as any);
 
-      // Handle closeVault specially: account is deleted on-chain but we need to update Redis status
+      // Handle closeVault: Anchor's close constraint deletes the account,
+      // so we update vault status in Redis from the cached data
       if (actions.includes("closeVault") && decoded.length === 0) {
         info("Detected closeVault action with deleted account", { signature });
 
@@ -287,7 +282,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               authority: closedVault.authority,
               owner: undefined,
               amount: undefined,
-              assetMint: closedVault.assetMint || undefined,
+              assetMint: closedVault.assetMint ?? undefined,
             });
 
             const activityKey = kActivity(signature, activityDto.type, slot);

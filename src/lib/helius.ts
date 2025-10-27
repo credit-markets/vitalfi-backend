@@ -5,7 +5,6 @@
  */
 
 import { createHmac, timingSafeEqual } from "crypto";
-import { PublicKey } from "@solana/web3.js";
 import { getCoder, type DecodedVault, type DecodedPosition } from "./anchor.js";
 import type { RawWebhookPayload } from "../types/helius.js";
 import type { AccountInfo } from "./solana.js";
@@ -92,14 +91,8 @@ export function decodeAccounts(
         data: decoded as DecodedVault,
       });
       continue;
-    } catch (err) {
-      // Log vault decode error for debugging
-      const vaultErr = err instanceof Error ? err.message : String(err);
-      if (vaultErr.includes("discriminator")) {
-        // Expected for position accounts
-      } else {
-        console.log(`Vault decode failed for ${info.pubkey.slice(0, 8)}: ${vaultErr.slice(0, 100)}`);
-      }
+    } catch {
+      // Try Position next
     }
 
     // Try decoding as Position (capitalized - matches IDL)
@@ -110,10 +103,8 @@ export function decodeAccounts(
         pda: info.pubkey,
         data: decoded as DecodedPosition,
       });
-    } catch (err) {
-      // Log position decode error for debugging
-      const posErr = err instanceof Error ? err.message : String(err);
-      console.log(`Position decode failed for ${info.pubkey.slice(0, 8)}: ${posErr.slice(0, 100)}`);
+    } catch {
+      // Not a vault or position account
     }
   }
 
