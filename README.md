@@ -1,6 +1,10 @@
 # VitalFi Backend
 
-Lightweight indexing and caching layer for the VitalFi Solana program.
+**Blockchain indexing and caching layer for healthcare DeFi**
+
+Built by Credit Markets | Part of the VitalFi ecosystem
+
+Lightweight, serverless backend that indexes VitalFi Solana program events and provides efficient REST APIs for vault, position, and activity data.
 
 ## Architecture
 
@@ -287,6 +291,15 @@ Solana → Helius → POST /api/webhooks/helius → KV → GET /api/* → Fronte
 
 ## Links
 
+- **VitalFi App:** https://app.vitalfi.lat
+- **VitalFi Docs:** https://docs.vitalfi.lat
+- **Landing Page:** https://vitalfi.lat
 - [Vercel Docs](https://vercel.com/docs)
 - [Helius Docs](https://docs.helius.dev)
 - [Anchor Docs](https://www.anchor-lang.com/)
+
+---
+
+**Powered by Credit Markets | Built on Solana**
+
+_Earn Yield. Empower Healthcare._
