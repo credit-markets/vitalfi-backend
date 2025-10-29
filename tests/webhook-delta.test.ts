@@ -7,6 +7,13 @@
 
 import { describe, it, expect } from "vitest";
 
+type VaultState = {
+  totalDeposited: bigint;
+  totalClaimed: bigint;
+  payout_num: bigint;
+  payout_den: bigint;
+};
+
 describe("Webhook delta calculations", () => {
   describe("Vault deposit deltas", () => {
     it("should calculate delta for deposit with previous state", () => {
@@ -350,6 +357,143 @@ describe("Webhook delta calculations", () => {
       }
 
       expect(amount).toBeUndefined();
+    });
+  });
+
+  describe("Mature vault amount tracking", () => {
+    it("should track payout_num for matureVault action with previous state", () => {
+      const action: string = "matureVault";
+      const oldVault: VaultState = {
+        totalDeposited: 10000n,
+        totalClaimed: 0n,
+        payout_num: 0n,
+        payout_den: 0n,
+      };
+
+      const newVault: VaultState = {
+        totalDeposited: 10000n,
+        totalClaimed: 0n,
+        payout_num: 11000n, // Authority returned 11000 (10% yield)
+        payout_den: 10000n,
+      };
+
+      let amount: string | undefined;
+      if (action === "matureVault" && newVault.payout_num > 0n) {
+        amount = newVault.payout_num.toString();
+      }
+
+      expect(amount).toBe("11000");
+    });
+
+    it("should track payout_num for matureVault action without previous state", () => {
+      const action: string = "matureVault";
+      const oldVault: VaultState | undefined = undefined;
+
+      const newVault: VaultState = {
+        totalDeposited: 5000n,
+        totalClaimed: 0n,
+        payout_num: 5500n, // Authority returned 5500
+        payout_den: 5000n,
+      };
+
+      let amount: string | undefined;
+      if (!oldVault && action === "matureVault" && newVault.payout_num > 0n) {
+        amount = newVault.payout_num.toString();
+      }
+
+      expect(amount).toBe("5500");
+    });
+
+    it("should not track amount when payout_num is zero", () => {
+      const action: string = "matureVault";
+      const newVault: VaultState = {
+        totalDeposited: 1000n,
+        totalClaimed: 0n,
+        payout_num: 0n, // Edge case: zero payout
+        payout_den: 1000n,
+      };
+
+      let amount: string | undefined;
+      if (action === "matureVault" && newVault.payout_num > 0n) {
+        amount = newVault.payout_num.toString();
+      }
+
+      expect(amount).toBeUndefined();
+    });
+
+    it("should handle large payout amounts with precision", () => {
+      const action: string = "matureVault";
+      // Example: 1 million USDC deposited, 1.16 million returned (16% APY)
+      const newVault: VaultState = {
+        totalDeposited: 1_000_000_000_000n, // 1M USDC (6 decimals)
+        totalClaimed: 0n,
+        payout_num: 1_160_000_000_000n, // 1.16M USDC returned
+        payout_den: 1_000_000_000_000n,
+      };
+
+      let amount: string | undefined;
+      if (action === "matureVault" && newVault.payout_num > 0n) {
+        amount = newVault.payout_num.toString();
+      }
+
+      expect(amount).toBe("1160000000000");
+      expect(BigInt(amount!)).toBe(1_160_000_000_000n);
+    });
+
+    it("should verify payout_num represents total returned amount", () => {
+      // Test based on smart contract logic: vault.payout_num = return_amount as u128
+      const totalDeposited = 700n;
+      const returnAmount = 770n; // Authority returned 770 (70 profit)
+
+      const vault: VaultState = {
+        totalDeposited,
+        totalClaimed: 0n,
+        payout_num: returnAmount, // This IS the total amount returned
+        payout_den: totalDeposited,
+      };
+
+      // Verify payout_num is the actual returned amount
+      expect(vault.payout_num).toBe(770n);
+      expect(vault.payout_num).toBe(returnAmount);
+
+      // Verify the ratio is correct for user calculations
+      const userDeposit = 400n;
+      const userPayout = (userDeposit * vault.payout_num) / vault.payout_den;
+      expect(userPayout).toBe(440n); // 400 * 770 / 700 = 440
+    });
+
+    it("should handle matureVault before and after state transition", () => {
+      const action: string = "matureVault";
+
+      // Before maturity
+      const oldVault: VaultState = {
+        totalDeposited: 10000n,
+        totalClaimed: 0n,
+        payout_num: 0n, // Not matured yet
+        payout_den: 0n,
+      };
+
+      // After maturity
+      const newVault: VaultState = {
+        totalDeposited: 10000n,
+        totalClaimed: 0n,
+        payout_num: 10800n, // 8% yield
+        payout_den: 10000n,
+      };
+
+      let amount: string | undefined;
+      if (action === "matureVault") {
+        // Check old state (should be 0)
+        const oldAmount = oldVault.payout_num > 0n ? oldVault.payout_num.toString() : undefined;
+        expect(oldAmount).toBeUndefined();
+
+        // Check new state (should have the returned amount)
+        if (newVault.payout_num > 0n) {
+          amount = newVault.payout_num.toString();
+        }
+      }
+
+      expect(amount).toBe("10800");
     });
   });
 });

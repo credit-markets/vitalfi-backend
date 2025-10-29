@@ -397,11 +397,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               if (delta > 0n) {
                 amount = delta.toString();
               }
+            } else if (action === "matureVault") {
+              // For matureVault, track the payout_num which represents the total amount
+              // returned by authority at maturity (used as numerator in payout ratio)
+              if (newVault.payout_num > 0n) {
+                amount = newVault.payout_num.toString();
+              }
             }
           } else {
             // No previous state - use current total for any deposit-like action
             if ((action === "deposit" || action === "initializeVault") && BigInt(newVault.total_deposited) > 0n) {
               amount = BigInt(newVault.total_deposited).toString();
+            } else if (action === "matureVault" && newVault.payout_num > 0n) {
+              // Track the total amount returned by authority at maturity
+              amount = newVault.payout_num.toString();
             }
           }
         }
