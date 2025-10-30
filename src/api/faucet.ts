@@ -14,28 +14,30 @@ import {
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
-  createMintToInstruction,
+  createTransferInstruction,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
+import { json, error, handleCors } from "../lib/http.js";
 
 const DEVNET_USDT_MINT = "4d79dBszeKpibjrZgiXewW4DCfU2SE4oeiQETbJgnQEh";
 const FAUCET_AMOUNT = 1000; // 1000 USDT
 const USDT_DECIMALS = 9;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return handleCors(res);
+  }
 
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST") {
+    return error(res, 405, "Method not allowed");
+  }
 
   try {
     const { address } = req.body;
 
     if (!address) {
-      return res.status(400).json({ error: "Address required" });
+      return error(res, 400, "Address required");
     }
 
     // Validate address
@@ -43,13 +45,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       recipientPubkey = new PublicKey(address);
     } catch {
-      return res.status(400).json({ error: "Invalid Solana address" });
+      return error(res, 400, "Invalid Solana address");
     }
 
     // Check if faucet keypair is configured
     const faucetPrivateKey = process.env.FAUCET_PRIVATE_KEY;
     if (!faucetPrivateKey) {
-      return res.status(503).json({ error: "Faucet not configured" });
+      return error(res, 503, "Faucet not configured");
     }
 
     // Initialize
@@ -59,6 +61,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
     const mintPubkey = new PublicKey(DEVNET_USDT_MINT);
 
+    // Get faucet's token account (treasury)
+    const faucetAta = await getAssociatedTokenAddress(
+      mintPubkey,
+      faucetKeypair.publicKey
+    );
+
     // Get recipient ATA
     const recipientAta = await getAssociatedTokenAddress(
       mintPubkey,
@@ -67,7 +75,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const transaction = new Transaction();
 
-    // Create ATA if doesn't exist
+    // Create recipient ATA if doesn't exist
     const ataInfo = await connection.getAccountInfo(recipientAta);
     if (!ataInfo) {
       transaction.add(
@@ -80,11 +88,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
     }
 
-    // Mint tokens
+    // Transfer tokens from faucet treasury to recipient
     const amount = BigInt(FAUCET_AMOUNT * 10 ** USDT_DECIMALS);
     transaction.add(
-      createMintToInstruction(
-        mintPubkey,
+      createTransferInstruction(
+        faucetAta,
         recipientAta,
         faucetKeypair.publicKey,
         amount
@@ -95,16 +103,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const signature = await connection.sendTransaction(transaction, [faucetKeypair]);
     await connection.confirmTransaction(signature, "confirmed");
 
-    return res.status(200).json({
+    return json(res, 200, {
       success: true,
       signature,
       amount: FAUCET_AMOUNT,
     });
-  } catch (error) {
-    console.error("Faucet error:", error);
-    return res.status(500).json({
-      error: "Faucet failed",
-      details: error instanceof Error ? error.message : "Unknown error",
-    });
+  } catch (err) {
+    console.error("Faucet error:", err);
+    return error(
+      res,
+      500,
+      "Faucet failed",
+      err instanceof Error ? err.message : "Unknown error"
+    );
   }
 }
