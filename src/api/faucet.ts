@@ -14,7 +14,7 @@ import {
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
-  createMintToInstruction,
+  createTransferInstruction,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import { json, error, handleCors } from "../lib/http.js";
@@ -61,6 +61,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
     const mintPubkey = new PublicKey(DEVNET_USDT_MINT);
 
+    // Get faucet's token account (treasury)
+    const faucetAta = await getAssociatedTokenAddress(
+      mintPubkey,
+      faucetKeypair.publicKey
+    );
+
     // Get recipient ATA
     const recipientAta = await getAssociatedTokenAddress(
       mintPubkey,
@@ -69,7 +75,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const transaction = new Transaction();
 
-    // Create ATA if doesn't exist
+    // Create recipient ATA if doesn't exist
     const ataInfo = await connection.getAccountInfo(recipientAta);
     if (!ataInfo) {
       transaction.add(
@@ -82,11 +88,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
     }
 
-    // Mint tokens
+    // Transfer tokens from faucet treasury to recipient
     const amount = BigInt(FAUCET_AMOUNT * 10 ** USDT_DECIMALS);
     transaction.add(
-      createMintToInstruction(
-        mintPubkey,
+      createTransferInstruction(
+        faucetAta,
         recipientAta,
         faucetKeypair.publicKey,
         amount
