@@ -231,8 +231,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             });
 
             const activityKey = kActivity(signature, activityDto.type, slot);
-            const activityTtlSeconds = cfg.activityTtlDays * 24 * 3600;
-            const wasNew = await setnx(activityKey, activityDto, { ex: activityTtlSeconds });
+            const wasNew = await setnx(activityKey, activityDto);
 
             if (wasNew === 1) {
               const score = activityDto.blockTimeEpoch || slot;
@@ -459,9 +458,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const activityKey = kActivity(signature, activityDto.type, slot);
 
-        // Use SETNX for idempotent writes with configurable TTL to prevent unbounded growth
-        const activityTtlSeconds = cfg.activityTtlDays * 24 * 3600;
-        const wasNew = await setnx(activityKey, activityDto, { ex: activityTtlSeconds });
+        // Use SETNX for idempotent writes (no TTL - activity data persists forever)
+        const wasNew = await setnx(activityKey, activityDto);
 
         if (wasNew === 1) {
           // Only add to ZSETs if this is a new activity
