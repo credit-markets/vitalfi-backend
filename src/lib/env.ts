@@ -34,7 +34,6 @@ export const cfg = {
   // Metrics
   metricsApiKey: getEnv("METRICS_API_KEY", false) || "",
 
-  // CORS - comma-separated list of allowed origins
-  // Defaults to vitalfi.lat domains for production
-  corsOrigins: getEnv("CORS_ORIGINS", false) || "https://vitalfi.lat,https://www.vitalfi.lat,https://app.vitalfi.lat,http://localhost:3000",
+  // CORS
+  corsOrigins: getEnv("CORS_ORIGINS", false) || "http://localhost:3000",
 };
