@@ -249,6 +249,97 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         continue;
       }
 
+      // Handle claim with position closure: Anchor's close constraint deletes the position,
+      // so we update position status in Redis from the cached data
+      if (actions.includes("claim")) {
+        // Find null accounts that could be deleted positions
+        const potentialPositionKeys = accountKeys.filter((_: string, i: number) => infos[i] === null);
+
+        for (const positionPda of potentialPositionKeys) {
+          const existing = await getJSON<import("../../types/dto.js").PositionDTO>(kPositionJson(positionPda));
+          if (existing && existing.deposited && BigInt(existing.deposited) > 0) {
+            // Get the vault to calculate payout amount
+            const vault = await getJSON<import("../../types/dto.js").VaultDTO>(kVaultJson(existing.vaultPda));
+
+            let claimAmount: string;
+            if (vault && vault.status === "Canceled") {
+              // Refund: claimed = deposited
+              claimAmount = existing.deposited;
+            } else if (vault && vault.payoutNum && vault.payoutDen && BigInt(vault.payoutDen) > 0) {
+              // Calculate payout: deposited * payoutNum / payoutDen
+              const deposited = BigInt(existing.deposited);
+              const num = BigInt(vault.payoutNum);
+              const den = BigInt(vault.payoutDen);
+              claimAmount = ((deposited * num) / den).toString();
+            } else {
+              // Fallback: use deposited amount
+              claimAmount = existing.deposited;
+            }
+
+            // Update position to mark as fully claimed
+            const claimedPosition: import("../../types/dto.js").PositionDTO = {
+              ...existing,
+              claimed: claimAmount,
+              slot,
+              updatedAt: blockTime ? new Date(blockTime * 1000).toISOString() : new Date().toISOString(),
+              updatedAtEpoch: blockTime ?? Math.floor(Date.now() / 1000),
+            };
+
+            // Update in Redis with proper indexing
+            await Promise.all([
+              setJSON(kPositionJson(positionPda), claimedPosition),
+              zadd(kOwnerPositionsByUpdated(claimedPosition.owner), claimedPosition.updatedAtEpoch, positionPda),
+            ]);
+
+            // Create activity event for claim
+            const activityDto = toActivityDTO("claim", {
+              txSig: signature,
+              slot: slot,
+              blockTime: blockTime,
+              vaultPda: existing.vaultPda,
+              positionPda: positionPda,
+              authority: vault?.authority,
+              owner: existing.owner,
+              amount: claimAmount,
+              assetMint: vault?.assetMint ?? undefined,
+            });
+
+            const activityKey = kActivity(signature, activityDto.type, slot);
+            const wasNew = await setnx(activityKey, activityDto);
+
+            if (wasNew === 1) {
+              const score = activityDto.blockTimeEpoch || slot;
+              const zsetOps: Promise<unknown>[] = [];
+
+              if (activityDto.vaultPda) {
+                zsetOps.push(zadd(kVaultActivity(activityDto.vaultPda), score, activityKey));
+              }
+              if (activityDto.owner) {
+                zsetOps.push(zadd(kOwnerActivity(activityDto.owner), score, activityKey));
+              }
+
+              await Promise.all(zsetOps);
+              activitiesProcessed++;
+            }
+
+            positionsProcessed++;
+
+            info("Processed claim with position closure", {
+              positionPda,
+              owner: existing.owner,
+              vaultPda: existing.vaultPda,
+              claimAmount,
+            });
+          }
+        }
+
+        // If we processed deleted positions for claim, skip normal processing
+        // But only if there are no other decoded accounts to process
+        if (decoded.length === 0) {
+          continue;
+        }
+      }
+
       if (decoded.length === 0) {
         continue;
       }
@@ -363,6 +454,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Create activity events
       // Note: actions and logMessages were already extracted earlier for closeVault handling
       for (const action of actions) {
+        // Claim activity is always handled by the deleted position handler above
+        // since positions are always closed on claim
+        if (action === "claim") {
+          continue;
+        }
+
         // Try to find associated vault/position from decoded accounts
         const vaultItem = decoded.find((d) => d.type === "vault");
         const positionItem = decoded.find((d) => d.type === "position");
