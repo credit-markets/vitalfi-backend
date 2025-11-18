@@ -87,14 +87,33 @@ async function getClient() {
 export const kv = { getClient };
 
 /**
- * Batch multiple operations using Redis pipelining for better performance
- * Example: await batchOperations(() => [setJSON('key1', val1), sadd('key2', 'val2')])
+ * Execute multiple Redis operations in a single round-trip using MULTI/EXEC
+ * This is true Redis pipelining - all operations are sent together and executed atomically
+ *
+ * @param callback Function that receives a pipeline builder and adds commands
+ * @returns Array of results from each command
+ *
+ * @example
+ * await pipeline(async (pipe) => {
+ *   pipe.set('key1', 'value1');
+ *   pipe.zAdd('key2', { score: 1, value: 'member' });
+ *   pipe.sAdd('key3', 'member');
+ * });
  */
-export async function batchOperations(
-  operations: () => Promise<unknown>[]
-): Promise<void> {
-  const ops = operations();
-  await Promise.all(ops);
+export async function pipeline(
+  callback: (pipe: ReturnType<ReturnType<typeof createClient>['multi']>) => void
+): Promise<unknown[]> {
+  const client = await getClient();
+  const multi = client.multi();
+  callback(multi);
+  return multi.exec();
+}
+
+/**
+ * Helper to build prefixed key for pipeline operations
+ */
+export function prefixKey(key: string): string {
+  return `${cfg.prefix}${key}`;
 }
 
 /**

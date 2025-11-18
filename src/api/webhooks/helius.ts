@@ -14,7 +14,7 @@ import { json, error } from "../../lib/http.js";
 import { extractActionsFromLogs, decodeAccounts } from "../../lib/helius.js";
 import { getCoder } from "../../lib/anchor.js";
 import { toVaultDTO, toPositionDTO, toActivityDTO } from "../../lib/normalize.js";
-import { setJSON, sadd, zadd, zrem, setnx, batchOperations, getJSON } from "../../lib/kv.js";
+import { setJSON, sadd, zadd, zrem, setnx, getJSON, pipeline, prefixKey } from "../../lib/kv.js";
 import {
   kVaultJson,
   kVaultsSet,
@@ -30,8 +30,7 @@ import {
 import { cfg } from "../../lib/env.js";
 import { info, errorLog } from "../../lib/logger.js";
 import { MAX_WEBHOOK_PAYLOAD_SIZE } from "../../lib/constants.js";
-import type { RawWebhookPayload } from "../../types/helius.js";
-import { heliusWebhookPayloadSchema } from "../../types/helius.js";
+import { recordWebhook } from "../../lib/metrics.js";
 import { getMultipleAccounts, filterProgramAccounts } from "../../lib/solana.js";
 
 // Configure to read raw body for HMAC verification
@@ -66,6 +65,8 @@ async function getRawBody(req: VercelRequest): Promise<string> {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const start = Date.now();
+
   try {
     if (req.method !== "POST") {
       return error(res, 405, "Method not allowed");
@@ -85,9 +86,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Verify token from Authorization header (Helius raw webhooks use shared secret)
+    // Use timing-safe comparison to prevent timing attacks
     const token = req.headers.authorization as string | undefined;
-    if (!token || token !== cfg.heliusSecret) {
-      errorLog("Invalid or missing authentication token in webhook request");
+    if (!token) {
+      errorLog("Missing authentication token in webhook request");
+      return error(res, 401, "Invalid token");
+    }
+
+    try {
+      const tokenBuffer = Buffer.from(token);
+      const secretBuffer = Buffer.from(cfg.heliusSecret);
+      if (tokenBuffer.length !== secretBuffer.length || !timingSafeEqual(tokenBuffer, secretBuffer)) {
+        errorLog("Invalid authentication token in webhook request");
+        return error(res, 401, "Invalid token");
+      }
+    } catch {
+      errorLog("Token comparison failed");
       return error(res, 401, "Invalid token");
     }
 
@@ -107,19 +121,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 200, { ok: true, message: "pong" });
     }
 
-    // Normalize to items array
+    // Normalize to items array and validate each item
     const items: any[] = Array.isArray(body) ? body : [body];
 
-    info("Received Helius webhook", { itemCount: items.length });
+    // Import and validate payload schema for raw transactions
+    const { rawWebhookPayloadSchema } = await import("../../types/helius.js");
+    const validatedItems: any[] = [];
 
-    // Helper to detect raw transaction format
-    // Note: signature may be top-level or inside transaction.signatures[0]
-    const isRaw = (it: any) => {
-      if (!it || !it.transaction || !it.meta || it.slot === undefined) return false;
-      // Check for signature at top level or in transaction
-      const hasSig = it.signature || (it.transaction?.signatures && it.transaction.signatures.length > 0);
-      return !!hasSig;
-    };
+    for (const item of items) {
+      // Skip non-object items
+      if (!item || typeof item !== 'object') continue;
+
+      // Validate raw transaction format
+      const parsed = rawWebhookPayloadSchema.safeParse(item);
+      if (parsed.success) {
+        validatedItems.push(parsed.data);
+      } else {
+        // Log validation error but continue processing other items
+        errorLog("Invalid webhook item schema", {
+          errors: parsed.error.issues,
+          keys: Object.keys(item)
+        });
+      }
+    }
+
+    info("Received Helius webhook", { itemCount: items.length, validatedCount: validatedItems.length });
 
     // Get Anchor coder
     const coder = getCoder();
@@ -128,19 +154,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let positionsProcessed = 0;
     let activitiesProcessed = 0;
 
-    // Process each item in the webhook payload
-    for (const item of items) {
-      if (!isRaw(item)) {
-        info("Skipping non-raw item", { keys: Object.keys(item || {}) });
-        continue;
-      }
-
-      // Extract signature - may be top-level or in transaction.signatures[0]
-      const signature = item.signature || item.transaction?.signatures?.[0];
-      if (!signature) {
-        info("Skipping item without signature", { keys: Object.keys(item) });
-        continue;
-      }
+    // Process each validated item in the webhook payload
+    for (const item of validatedItems) {
+      // Extract signature - validated items have signature at top level
+      const signature = item.signature;
 
       const slot = item.slot;
       const blockTime = item.blockTime ?? null;
@@ -168,7 +185,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           continue; // Skip this transaction
         }
       } catch (err) {
-        errorLog("Error checking transaction", { signature, error: String(err) });
+        errorLog("Error checking transaction - skipping", { signature, error: String(err) });
+        continue; // Skip this transaction on RPC error
       }
 
       // Fetch latest base64 account data (raw payloads don't include it)
@@ -372,8 +390,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       });
 
-      // Process each decoded account with batch operations for better performance
-      const accountOperations: Promise<unknown>[] = [];
+      // Process each decoded account with Redis pipelining for better performance
+      // Collect all operations to execute in a single MULTI/EXEC
+      interface PipelineOp {
+        type: 'set' | 'sadd' | 'zadd' | 'zrem';
+        key: string;
+        value?: string;
+        score?: number;
+        members?: string[];
+      }
+      const pipelineOps: PipelineOp[] = [];
 
       for (const decodedItem of decoded) {
         if (decodedItem.type === "vault") {
@@ -397,25 +423,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           }
 
-          // Batch all vault operations including ZSET for ordering
-          // Also write to per-status ZSET for efficient filtered queries
-          const vaultOps: Promise<unknown>[] = [
-            setJSON(kVaultJson(decodedItem.pda), dto),
-            sadd(kVaultsSet(), decodedItem.pda),
-            sadd(kAuthorityVaults(dto.authority), decodedItem.pda),
-            zadd(kAuthorityVaultsByUpdated(dto.authority), dto.updatedAtEpoch, decodedItem.pda),
-            zadd(kAuthorityVaultsByUpdated(dto.authority, dto.status), dto.updatedAtEpoch, decodedItem.pda)
-          ];
+          // Queue all vault operations for pipeline
+          pipelineOps.push(
+            { type: 'set', key: kVaultJson(decodedItem.pda), value: JSON.stringify(dto) },
+            { type: 'sadd', key: kVaultsSet(), members: [decodedItem.pda] },
+            { type: 'sadd', key: kAuthorityVaults(dto.authority), members: [decodedItem.pda] },
+            { type: 'zadd', key: kAuthorityVaultsByUpdated(dto.authority), score: dto.updatedAtEpoch, value: decodedItem.pda },
+            { type: 'zadd', key: kAuthorityVaultsByUpdated(dto.authority, dto.status), score: dto.updatedAtEpoch, value: decodedItem.pda }
+          );
 
           // If status changed, remove from old per-status ZSET to prevent stale entries
           const statusChanged = existingVault && existingVault.status !== dto.status;
           if (statusChanged) {
-            vaultOps.push(
-              zrem(kAuthorityVaultsByUpdated(dto.authority, existingVault.status), decodedItem.pda)
+            pipelineOps.push(
+              { type: 'zrem', key: kAuthorityVaultsByUpdated(dto.authority, existingVault.status), members: [decodedItem.pda] }
             );
           }
 
-          accountOperations.push(...vaultOps);
           vaultsProcessed++;
         } else if (decodedItem.type === "position") {
           const positionData = decodedItem.data as import("../../lib/anchor.js").DecodedPosition;
@@ -437,19 +461,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           }
 
-          // Batch all position operations including ZSET for ordering
-          accountOperations.push(
-            setJSON(kPositionJson(decodedItem.pda), dto),
-            sadd(kOwnerPositions(dto.owner), decodedItem.pda),
-            zadd(kOwnerPositionsByUpdated(dto.owner), dto.updatedAtEpoch, decodedItem.pda)
+          // Queue all position operations for pipeline
+          pipelineOps.push(
+            { type: 'set', key: kPositionJson(decodedItem.pda), value: JSON.stringify(dto) },
+            { type: 'sadd', key: kOwnerPositions(dto.owner), members: [decodedItem.pda] },
+            { type: 'zadd', key: kOwnerPositionsByUpdated(dto.owner), score: dto.updatedAtEpoch, value: decodedItem.pda }
           );
 
           positionsProcessed++;
         }
       }
 
-      // Execute all account operations in parallel
-      await batchOperations(() => accountOperations);
+      // Execute all account operations in a single Redis pipeline (MULTI/EXEC)
+      if (pipelineOps.length > 0) {
+        await pipeline((pipe) => {
+          for (const op of pipelineOps) {
+            const key = prefixKey(op.key);
+            switch (op.type) {
+              case 'set':
+                pipe.set(key, op.value!);
+                break;
+              case 'sadd':
+                pipe.sAdd(key, op.members!);
+                break;
+              case 'zadd':
+                pipe.zAdd(key, { score: op.score!, value: op.value! });
+                break;
+              case 'zrem':
+                pipe.zRem(key, op.members!);
+                break;
+            }
+          }
+        });
+      }
 
       // Create activity events
       // Note: actions and logMessages were already extracted earlier for closeVault handling
@@ -555,44 +599,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const activityKey = kActivity(signature, activityDto.type, slot);
 
-        // Use SETNX for idempotent writes (no TTL - activity data persists forever)
-        const wasNew = await setnx(activityKey, activityDto);
+        // Use blockTimeEpoch for score (fallback to slot if null)
+        const score = activityDto.blockTimeEpoch || slot;
 
-        if (wasNew === 1) {
-          // Only add to ZSETs if this is a new activity
-          // Use blockTimeEpoch for score (fallback to slot if null)
-          const score = activityDto.blockTimeEpoch || slot;
+        try {
+          // Atomic pipeline: create activity + index in ZSETs together
+          // All operations succeed or fail as a unit
+          const results = await pipeline((pipe) => {
+            // SETNX for idempotent activity creation
+            pipe.set(prefixKey(activityKey), JSON.stringify(activityDto), { NX: true });
 
-          try {
-            // Add to ZSETs with proper error handling to maintain consistency
-            const zsetOps: Promise<unknown>[] = [];
-
+            // Add to vault activity ZSET
             if (activityDto.vaultPda) {
-              zsetOps.push(zadd(kVaultActivity(activityDto.vaultPda), score, activityKey));
+              pipe.zAdd(prefixKey(kVaultActivity(activityDto.vaultPda)), {
+                score,
+                value: activityKey
+              });
             }
 
+            // Add to owner activity ZSET
             if (activityDto.owner) {
-              zsetOps.push(zadd(kOwnerActivity(activityDto.owner), score, activityKey));
+              pipe.zAdd(prefixKey(kOwnerActivity(activityDto.owner)), {
+                score,
+                value: activityKey
+              });
             }
+          });
 
-            // Execute all ZSET operations in parallel
-            await Promise.all(zsetOps);
+          // Check if activity was newly created (SETNX returns "OK" if set, null if exists)
+          const wasNew = results[0] === "OK";
+          if (wasNew) {
             activitiesProcessed++;
-          } catch (err) {
-            const indexError = err instanceof Error ? err : new Error(String(err));
-            errorLog("Failed to index activity in ZSETs", { activityKey, error: indexError });
-            // Activity was created but not fully indexed - this will be caught in monitoring
-            // Don't re-throw to avoid failing the entire webhook
           }
+        } catch (err) {
+          const indexError = err instanceof Error ? err : new Error(String(err));
+          errorLog("Failed to create/index activity atomically", { activityKey, error: indexError });
+          // Re-throw to fail the webhook - Helius will retry
+          throw err;
         }
       }
     }
 
+    const duration = Date.now() - start;
     info("Webhook processed successfully", {
       vaults: vaultsProcessed,
       positions: positionsProcessed,
       activities: activitiesProcessed,
+      durationMs: duration,
     });
+
+    recordWebhook(duration, vaultsProcessed, positionsProcessed, activitiesProcessed);
 
     return json(res, 200, {
       ok: true,
@@ -603,8 +659,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     });
   } catch (err) {
+    const duration = Date.now() - start;
     const processingError = err instanceof Error ? err : new Error(String(err));
     errorLog("Webhook processing failed", processingError);
+    recordWebhook(duration, 0, 0, 0, true);
     return error(res, 500, "Internal server error");
   }
 }

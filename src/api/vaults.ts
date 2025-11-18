@@ -14,6 +14,8 @@ import { cfg } from "../lib/env.js";
 import { logRequest, errorLog } from "../lib/logger.js";
 import { isValidPubkey, cursorSchema } from "../lib/validation.js";
 import { MAX_SET_SIZE, SET_WARNING_THRESHOLD } from "../lib/constants.js";
+import { checkRateLimit, getClientIp, setRateLimitHeaders, RATE_LIMITS } from "../lib/rate-limit.js";
+import { recordRequest } from "../lib/metrics.js";
 import type { VaultDTO } from "../types/dto.js";
 
 const QuerySchema = z.object({
@@ -34,6 +36,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method !== "GET") {
       return error(res, 405, "Method not allowed");
+    }
+
+    // Check rate limit by IP
+    const clientIp = getClientIp(req.headers as Record<string, string | string[] | undefined>);
+    const rateLimitResult = await checkRateLimit(`ip:${clientIp}`, RATE_LIMITS.perIp);
+    setRateLimitHeaders(res, rateLimitResult, RATE_LIMITS.perIp);
+
+    if (!rateLimitResult.allowed) {
+      const duration = Date.now() - start;
+      logRequest("GET", "/api/vaults", 429, duration);
+      recordRequest("/api/vaults", 429, duration, true);
+      return error(res, 429, "Too many requests");
     }
 
     // Validate query params
@@ -129,16 +143,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         "Cache-Control",
         `s-maxage=${cfg.cacheTtl}, stale-while-revalidate=${cfg.cacheTtl * 2}`
       );
-      logRequest("GET", "/api/vaults", 304, Date.now() - start);
+      const duration = Date.now() - start;
+      logRequest("GET", "/api/vaults", 304, duration);
+      recordRequest("/api/vaults", 304, duration);
       return res.status(304).end();
     }
 
-    logRequest("GET", "/api/vaults", 200, Date.now() - start);
+    const duration = Date.now() - start;
+    logRequest("GET", "/api/vaults", 200, duration);
+    recordRequest("/api/vaults", 200, duration);
     return json(res, 200, body, etag, cfg.cacheTtl);
   } catch (err) {
     const queryError = err instanceof Error ? err : new Error(String(err));
     errorLog("Vaults query failed", { query: req.query, error: queryError });
-    logRequest("GET", "/api/vaults", 500, Date.now() - start);
+    const duration = Date.now() - start;
+    logRequest("GET", "/api/vaults", 500, duration);
+    recordRequest("/api/vaults", 500, duration);
     return error(res, 500, "Internal server error");
   }
 }

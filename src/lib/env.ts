@@ -30,4 +30,11 @@ export const cfg = {
 
   // Storage
   prefix: getEnv("STORAGE_PREFIX", false) || "vitalfi:",
+
+  // Metrics
+  metricsApiKey: getEnv("METRICS_API_KEY", false) || "",
+
+  // CORS - comma-separated list of allowed origins
+  // Defaults to vitalfi.lat domains for production
+  corsOrigins: getEnv("CORS_ORIGINS", false) || "https://vitalfi.lat,https://www.vitalfi.lat,http://localhost:3000",
 };
