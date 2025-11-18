@@ -32,8 +32,9 @@ import { info, errorLog } from "../../lib/logger.js";
 import { MAX_WEBHOOK_PAYLOAD_SIZE } from "../../lib/constants.js";
 import { recordWebhook } from "../../lib/metrics.js";
 import { getMultipleAccounts, filterProgramAccounts } from "../../lib/solana.js";
+import { rawWebhookPayloadSchema } from "../../types/helius.js";
 
-// Configure to read raw body for HMAC verification
+// Configure to read raw body
 export const config = {
   api: {
     bodyParser: false,
@@ -72,7 +73,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return error(res, 405, "Method not allowed");
     }
 
-    // Read raw body for HMAC verification with size validation
+    // Read raw body with size validation
     let rawBody: string;
     try {
       rawBody = await getRawBody(req);
@@ -85,7 +86,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       throw err;
     }
 
-    // Verify token from Authorization header (Helius raw webhooks use shared secret)
+    // Verify shared secret from Authorization header
     // Use timing-safe comparison to prevent timing attacks
     const token = req.headers.authorization as string | undefined;
     if (!token) {
@@ -121,31 +122,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 200, { ok: true, message: "pong" });
     }
 
-    // Normalize to items array and validate each item
+    // Normalize to items array
     const items: any[] = Array.isArray(body) ? body : [body];
 
-    // Import and validate payload schema for raw transactions
-    const { rawWebhookPayloadSchema } = await import("../../types/helius.js");
-    const validatedItems: any[] = [];
+    info("Received Helius webhook", { itemCount: items.length });
 
-    for (const item of items) {
-      // Skip non-object items
+    // Validate each item against schema
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
       if (!item || typeof item !== 'object') continue;
 
-      // Validate raw transaction format
       const parsed = rawWebhookPayloadSchema.safeParse(item);
-      if (parsed.success) {
-        validatedItems.push(parsed.data);
-      } else {
-        // Log validation error but continue processing other items
-        errorLog("Invalid webhook item schema", {
-          errors: parsed.error.issues,
-          keys: Object.keys(item)
-        });
+      if (!parsed.success) {
+        errorLog("Webhook payload validation failed", new Error(JSON.stringify(parsed.error.issues)));
+        return error(res, 400, "Invalid webhook payload", parsed.error.issues);
       }
     }
-
-    info("Received Helius webhook", { itemCount: items.length, validatedCount: validatedItems.length });
 
     // Get Anchor coder
     const coder = getCoder();
@@ -154,40 +146,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let positionsProcessed = 0;
     let activitiesProcessed = 0;
 
-    // Process each validated item in the webhook payload
-    for (const item of validatedItems) {
-      // Extract signature - validated items have signature at top level
-      const signature = item.signature;
+    // Process each item in the webhook payload
+    for (const item of items) {
+      // Skip non-object items
+      if (!item || typeof item !== 'object') continue;
+
+      // Extract signature from transaction.signatures[0]
+      const signature = item.transaction?.signatures?.[0];
+      if (!signature) {
+        info("Skipping item without signature", { keys: Object.keys(item) });
+        continue;
+      }
 
       const slot = item.slot;
       const blockTime = item.blockTime ?? null;
       const keys = item.transaction?.message?.accountKeys ?? [];
       const accountKeys = keys.map((k: any) => typeof k === "string" ? k : k?.pubkey).filter(Boolean);
-
-      // Sanity check: verify transaction exists on this cluster
-      try {
-        const txCheck = await fetch(cfg.solanaRpcEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: 1,
-            method: "getTransaction",
-            params: [signature, { encoding: "json", commitment: "confirmed" }]
-          })
-        });
-        const txResult = await txCheck.json();
-        if (!txResult.result) {
-          errorLog("Transaction NOT found on current RPC - cluster mismatch", {
-            signature,
-            rpcEndpoint: cfg.solanaRpcEndpoint
-          });
-          continue; // Skip this transaction
-        }
-      } catch (err) {
-        errorLog("Error checking transaction - skipping", { signature, error: String(err) });
-        continue; // Skip this transaction on RPC error
-      }
 
       // Fetch latest base64 account data (raw payloads don't include it)
       // Use 3 retries with per-key fallback for devnet visibility lag
