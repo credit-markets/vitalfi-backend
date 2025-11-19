@@ -8,7 +8,7 @@
 import type { VercelRequest, VercelResponse} from "@vercel/node";
 import { z } from "zod";
 import { zrevrangebyscore, getJSON } from "../lib/kv.js";
-import { json, error, handleCors } from "../lib/http.js";
+import { json, error, handleCors, handleNotModified } from "../lib/http.js";
 import { kVaultActivity, kOwnerActivity } from "../lib/keys.js";
 import { createEtag } from "../lib/etag.js";
 import { cfg } from "../lib/env.js";
@@ -102,16 +102,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const etag = createEtag(body);
 
     // Handle 304 Not Modified
-    if (req.headers["if-none-match"] === etag) {
-      res.setHeader("ETag", etag);
-      res.setHeader(
-        "Cache-Control",
-        `s-maxage=${cfg.cacheTtl}, stale-while-revalidate=${cfg.cacheTtl * 2}`
-      );
+    if (handleNotModified(req, res, etag)) {
       const duration = Date.now() - start;
       logRequest("GET", "/api/activity", 304, duration);
       recordRequest("/api/activity", 304, duration);
-      return res.status(304).end();
+      return;
     }
 
     const duration = Date.now() - start;

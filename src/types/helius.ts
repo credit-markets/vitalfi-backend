@@ -76,9 +76,3 @@ export const rawWebhookPayloadSchema = z.object({
   }).passthrough(),
   version: z.union([z.string(), z.number()]).optional(),
 });
-
-// Export as main schema (for backwards compatibility)
-export const heliusWebhookPayloadSchema = rawWebhookPayloadSchema;
-
-// Export inferred type from Zod schema for type-safe validated data
-export type RawWebhookPayloadValidated = z.infer<typeof rawWebhookPayloadSchema>;

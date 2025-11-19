@@ -34,11 +34,6 @@ export const RATE_LIMITS = {
     limit: 100,
     windowSeconds: 60,
   },
-  /** Per-public-key rate limit (for owner/authority queries) */
-  perKey: {
-    limit: 300,
-    windowSeconds: 60,
-  },
 } as const;
 
 /**

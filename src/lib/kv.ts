@@ -151,16 +151,6 @@ export async function setJSON(
 }
 
 /**
- * Add member to set
- */
-export async function sadd(key: string, ...members: string[]): Promise<number> {
-  const client = await getClient();
-  const prefixedKey = `${cfg.prefix}${key}`;
-  const result = await client.sAdd(prefixedKey, members);
-  return typeof result === 'number' ? result : 0;
-}
-
-/**
  * Get all members of a set
  */
 export async function smembers(key: string): Promise<string[]> {
@@ -216,16 +206,6 @@ export async function zrevrangebyscore(
 
   const results = await client.zRangeByScore(prefixedKey, min, max, options);
   return results;
-}
-
-/**
- * Check if key exists
- */
-export async function exists(key: string): Promise<boolean> {
-  const client = await getClient();
-  const prefixedKey = `${cfg.prefix}${key}`;
-  const result = await client.exists(prefixedKey);
-  return result === 1;
 }
 
 /**

@@ -213,18 +213,3 @@ export function getMetrics(): {
   };
 }
 
-/**
- * Reset all metrics (useful for testing)
- */
-export function resetMetrics(): void {
-  store.requests = {};
-  store.webhook = {
-    count: 0,
-    errors: 0,
-    latencies: [],
-    vaultsProcessed: 0,
-    positionsProcessed: 0,
-    activitiesProcessed: 0,
-  };
-  store.startTime = Date.now();
-}

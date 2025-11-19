@@ -4,7 +4,7 @@
  * Utilities for sending JSON responses with proper caching headers and ETags.
  */
 
-import type { VercelRequest, VercelResponse } from "@vercel/node";
+import type { VercelResponse } from "@vercel/node";
 import { cfg } from "./env.js";
 
 
@@ -65,4 +65,25 @@ export function handleCors(res: VercelResponse): VercelResponse {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, If-None-Match, X-Api-Key");
   res.setHeader("Access-Control-Max-Age", "86400"); // 24 hours
   return res.status(200).end();
+}
+
+/**
+ * Check If-None-Match header and return 304 if ETag matches
+ * Returns true if 304 was sent, false otherwise
+ */
+export function handleNotModified(
+  req: { headers: Record<string, string | string[] | undefined> },
+  res: VercelResponse,
+  etag: string
+): boolean {
+  if (req.headers["if-none-match"] === etag) {
+    res.setHeader("ETag", etag);
+    res.setHeader(
+      "Cache-Control",
+      `s-maxage=${cfg.cacheTtl}, stale-while-revalidate=${cfg.cacheTtl * 2}`
+    );
+    res.status(304).end();
+    return true;
+  }
+  return false;
 }

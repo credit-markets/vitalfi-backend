@@ -14,7 +14,7 @@ import { json, error } from "../../lib/http.js";
 import { extractActionsFromLogs, decodeAccounts } from "../../lib/helius.js";
 import { getCoder } from "../../lib/anchor.js";
 import { toVaultDTO, toPositionDTO, toActivityDTO } from "../../lib/normalize.js";
-import { setJSON, sadd, zadd, zrem, setnx, getJSON, pipeline, prefixKey } from "../../lib/kv.js";
+import { setJSON, zadd, zrem, setnx, getJSON, pipeline, prefixKey } from "../../lib/kv.js";
 import {
   kVaultJson,
   kVaultsSet,
