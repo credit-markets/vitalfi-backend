@@ -10,9 +10,9 @@
 
 import { z } from "zod";
 
-// Raw webhook format - matches Solana getTransaction response
+// Raw webhook format - matches actual Helius payload
 export interface RawTransactionMessage {
-  accountKeys: string[]; // Array of Base58 pubkeys involved in tx
+  accountKeys: Array<string | { pubkey: string; signer: boolean; writable: boolean }>;
   instructions: any[];
   recentBlockhash: string;
 }
@@ -35,25 +35,33 @@ export interface HeliusMeta {
 }
 
 export interface RawWebhookPayload {
-  signature: string;
-  slot: number;
   blockTime: number | null; // Unix epoch seconds, null if not finalized
+  indexWithinBlock: number;
+  slot: number;
   transaction: RawTransaction;
   meta: HeliusMeta;
+  version?: string | number;
 }
 
 // Zod schema for raw webhook payload validation
 export const rawWebhookPayloadSchema = z.object({
-  signature: z.string().min(1),
-  slot: z.number().int().nonnegative(),
   blockTime: z.number().int().nullable(),
+  indexWithinBlock: z.number().int().nonnegative(),
+  slot: z.number().int().nonnegative(),
   transaction: z.object({
-    signatures: z.array(z.string()),
+    signatures: z.array(z.string()).min(1),
     message: z.object({
-      accountKeys: z.array(z.string()),
+      accountKeys: z.array(z.union([
+        z.string(),
+        z.object({
+          pubkey: z.string(),
+          signer: z.boolean(),
+          writable: z.boolean(),
+        }),
+      ])),
       instructions: z.array(z.any()),
       recentBlockhash: z.string(),
-    }).passthrough(), // Allow additional fields
+    }).passthrough(),
   }).passthrough(),
   meta: z.object({
     logMessages: z.array(z.string()).optional(),
@@ -66,7 +74,5 @@ export const rawWebhookPayloadSchema = z.object({
     postTokenBalances: z.array(z.any()).optional(),
     rewards: z.array(z.any()).optional(),
   }).passthrough(),
+  version: z.union([z.string(), z.number()]).optional(),
 });
-
-// Export as main schema (for backwards compatibility)
-export const heliusWebhookPayloadSchema = rawWebhookPayloadSchema;

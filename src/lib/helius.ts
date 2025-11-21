@@ -1,39 +1,12 @@
 /**
  * Helius Webhook Helpers
  *
- * HMAC verification, log parsing, and account decoding.
+ * Log parsing and account decoding.
  */
 
-import { createHmac, timingSafeEqual } from "crypto";
 import { getCoder, type DecodedVault, type DecodedPosition } from "./anchor.js";
 import type { RawWebhookPayload } from "../types/helius.js";
 import type { AccountInfo } from "./solana.js";
-import { cfg } from "./env.js";
-
-/**
- * Verify Helius webhook signature using HMAC
- */
-export function verifyHeliusSignature(signature: string, rawBody: string): boolean {
-  if (!signature) {
-    return false;
-  }
-
-  const computed = createHmac("sha256", cfg.heliusSecret)
-    .update(rawBody)
-    .digest("hex");
-
-  // Constant-time comparison to prevent timing attacks
-  try {
-    const sigBuffer = Buffer.from(signature);
-    const computedBuffer = Buffer.from(computed);
-    if (sigBuffer.length !== computedBuffer.length) {
-      return false;
-    }
-    return timingSafeEqual(sigBuffer, computedBuffer);
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Extract instruction names from Anchor logs

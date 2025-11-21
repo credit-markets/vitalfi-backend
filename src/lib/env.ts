@@ -30,5 +30,10 @@ export const cfg = {
 
   // Storage
   prefix: getEnv("STORAGE_PREFIX", false) || "vitalfi:",
-  activityTtlDays: parseInt(getEnv("ACTIVITY_TTL_DAYS", false) || "30", 10),
+
+  // Metrics
+  metricsApiKey: getEnv("METRICS_API_KEY", false) || "",
+
+  // CORS - hardcoded allowed origins (production + local dev)
+  corsOrigins: "https://app.vitalfi.lat,http://localhost:3000",
 };

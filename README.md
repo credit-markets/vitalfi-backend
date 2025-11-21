@@ -183,14 +183,13 @@ curl "http://localhost:3000/api/activity?owner=Owner...&cursor=2025-10-20T12:00:
 
 ---
 
-### POST /api/webhooks/helius?token={secret}
+### POST /api/webhooks/helius
 
 Receives account update events from Helius.
 
 **Authentication:**
 
-- `X-Helius-Signature` header (HMAC SHA256)
-- `?token` query param must match `HELIUS_WEBHOOK_SECRET`
+- `Authorization` header must match `HELIUS_WEBHOOK_SECRET`
 
 **Setup:**
 
@@ -198,8 +197,8 @@ Receives account update events from Helius.
 2. Create new webhook:
    - Type: RAW
    - Accounts: `[VitalFiProgramID]`
-   - Encoding: base64
-   - URL: `https://your-backend.vercel.app/api/webhooks/helius?token={HELIUS_WEBHOOK_SECRET}`
+   - URL: `https://your-backend.vercel.app/api/webhooks/helius`
+   - Auth Header: Set to your `HELIUS_WEBHOOK_SECRET` value
 
 ---
 
@@ -226,8 +225,10 @@ vercel --prod
 Update Helius webhook URL to point to your production deployment:
 
 ```
-https://your-backend.vercel.app/api/webhooks/helius?token={your-secret}
+https://your-backend.vercel.app/api/webhooks/helius
 ```
+
+Set the Auth Header in Helius dashboard to your `HELIUS_WEBHOOK_SECRET` value.
 
 ---
 
@@ -271,10 +272,9 @@ Solana → Helius → POST /api/webhooks/helius → KV → GET /api/* → Fronte
 
 ## Troubleshooting
 
-**HMAC verification fails:**
+**Webhook authentication fails:**
 
 - Ensure `HELIUS_WEBHOOK_SECRET` matches in Helius dashboard and `.env.local`
-- Check that raw body is used (not parsed JSON)
 
 **Redis connection fails:**
 

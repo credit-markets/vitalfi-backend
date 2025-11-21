@@ -7,13 +7,15 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { z } from "zod";
 import { smembers, getJSON, zrevrangebyscore } from "../lib/kv.js";
-import { json, error, handleCors } from "../lib/http.js";
+import { json, error, handleCors, handleNotModified } from "../lib/http.js";
 import { kOwnerPositions, kOwnerPositionsByUpdated, kPositionJson } from "../lib/keys.js";
 import { createEtag } from "../lib/etag.js";
 import { cfg } from "../lib/env.js";
 import { logRequest, errorLog } from "../lib/logger.js";
 import { isValidPubkey, cursorSchema } from "../lib/validation.js";
 import { MAX_SET_SIZE, SET_WARNING_THRESHOLD } from "../lib/constants.js";
+import { checkRateLimit, getClientIp, setRateLimitHeaders, RATE_LIMITS } from "../lib/rate-limit.js";
+import { recordRequest } from "../lib/metrics.js";
 import type { PositionDTO } from "../types/dto.js";
 
 const QuerySchema = z.object({
@@ -28,17 +30,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Handle CORS preflight
     if (req.method === "OPTIONS") {
-      return handleCors(res);
+      return handleCors(res, req);
     }
 
     if (req.method !== "GET") {
-      return error(res, 405, "Method not allowed");
+      return error(res, 405, "Method not allowed", req);
+    }
+
+    // Check rate limit by IP
+    const clientIp = getClientIp(req.headers as Record<string, string | string[] | undefined>);
+    const rateLimitResult = await checkRateLimit(`ip:${clientIp}`, RATE_LIMITS.perIp);
+    setRateLimitHeaders(res, rateLimitResult, RATE_LIMITS.perIp);
+
+    if (!rateLimitResult.allowed) {
+      const duration = Date.now() - start;
+      logRequest("GET", "/api/positions", 429, duration);
+      recordRequest("/api/positions", 429, duration, true);
+      return error(res, 429, "Too many requests", req);
     }
 
     // Validate query params
     const parsed = QuerySchema.safeParse(req.query);
     if (!parsed.success) {
-      return error(res, 400, "Invalid query parameters", parsed.error.issues);
+      return error(res, 400, "Invalid query parameters", req, parsed.error.issues);
     }
 
     const { owner, cursor, limit } = parsed.data;
@@ -65,7 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Hard limit to prevent memory issues with large SETs
       if (pdas.length > MAX_SET_SIZE) {
         errorLog(`SET too large for owner ${owner}`, { positionCount: pdas.length, maxAllowed: MAX_SET_SIZE });
-        return error(res, 503, "Too many positions - ZSET index not ready. Please retry in a few seconds.");
+        return error(res, 503, "Too many positions - ZSET index not ready. Please retry in a few seconds.", req);
       }
 
       // Log warning for large SET fallbacks
@@ -112,22 +126,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const etag = createEtag(body);
 
     // Handle 304 Not Modified
-    if (req.headers["if-none-match"] === etag) {
-      res.setHeader("ETag", etag);
-      res.setHeader(
-        "Cache-Control",
-        `s-maxage=${cfg.cacheTtl}, stale-while-revalidate=${cfg.cacheTtl * 2}`
-      );
-      logRequest("GET", "/api/positions", 304, Date.now() - start);
-      return res.status(304).end();
+    if (handleNotModified(req, res, etag)) {
+      const duration = Date.now() - start;
+      logRequest("GET", "/api/positions", 304, duration);
+      recordRequest("/api/positions", 304, duration);
+      return;
     }
 
-    logRequest("GET", "/api/positions", 200, Date.now() - start);
-    return json(res, 200, body, etag, cfg.cacheTtl);
+    const duration = Date.now() - start;
+    logRequest("GET", "/api/positions", 200, duration);
+    recordRequest("/api/positions", 200, duration);
+    return json(res, 200, body, req, etag, cfg.cacheTtl);
   } catch (err) {
     const queryError = err instanceof Error ? err : new Error(String(err));
     errorLog("Positions query failed", { query: req.query, error: queryError });
-    logRequest("GET", "/api/positions", 500, Date.now() - start);
-    return error(res, 500, "Internal server error");
+    const duration = Date.now() - start;
+    logRequest("GET", "/api/positions", 500, duration);
+    recordRequest("/api/positions", 500, duration);
+    return error(res, 500, "Internal server error", req);
   }
 }
