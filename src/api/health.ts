@@ -16,11 +16,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Handle CORS preflight
     if (req.method === "OPTIONS") {
-      return handleCors(res);
+      return handleCors(res, req);
     }
 
     if (req.method !== "GET") {
-      return error(res, 405, "Method not allowed");
+      return error(res, 405, "Method not allowed", req);
     }
 
     const health = {
@@ -74,7 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const status = health.ok ? 200 : 503;
     logRequest("GET", "/api/health", status, duration);
 
-    return json(res, status, health);
+    return json(res, status, health, req);
   } catch (err) {
     const duration = Date.now() - start;
     errorLog("Health check failed", err);
@@ -83,6 +83,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 500, {
       ok: false,
       services: { kv: false, solana: false },
-    });
+    }, req);
   }
 }

@@ -4,25 +4,49 @@
  * Utilities for sending JSON responses with proper caching headers and ETags.
  */
 
-import type { VercelResponse } from "@vercel/node";
+import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { cfg } from "./env.js";
+
+/**
+ * Get CORS origin header value based on request origin
+ * Supports multiple origins by checking if request origin is in allowed list
+ */
+function getCorsOrigin(requestOrigin?: string): string {
+  const allowedOrigins = cfg.corsOrigins.split(",").map(o => o.trim());
+
+  // If request origin is in allowed list, echo it back
+  // This is required for credentials and allows multiple origins
+  if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+    return requestOrigin;
+  }
+
+  // If wildcard is allowed, use it
+  if (allowedOrigins.includes("*")) {
+    return "*";
+  }
+
+  // Default to first allowed origin
+  return allowedOrigins[0];
+}
 
 
 /**
  * Send JSON response with optional ETag and cache headers
  */
-export function json(
+export function json<T = Record<string, any>>(
   res: VercelResponse,
   status: number,
-  body: unknown,
+  body: T,
+  req: VercelRequest,
   etag?: string,
-  cacheSeconds?: number,
+  cacheSeconds?: number
 ): VercelResponse {
   res.status(status);
   res.setHeader("Content-Type", "application/json");
 
   // CORS headers - restrict to allowed origins
-  res.setHeader("Access-Control-Allow-Origin", cfg.corsOrigins);
+  const origin = req.headers?.origin as string | undefined;
+  res.setHeader("Access-Control-Allow-Origin", getCorsOrigin(origin));
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, If-None-Match, X-Api-Key");
 
@@ -47,20 +71,22 @@ export function error(
   res: VercelResponse,
   status: number,
   message: string,
-  details?: unknown
+  req: VercelRequest,
+  details?: Record<string, any> | string | any[]
 ): VercelResponse {
-  const body: { error: string; details?: unknown } = { error: message };
-  if (details) {
+  const body: { error: string; details?: typeof details } = { error: message };
+  if (details !== undefined) {
     body.details = details;
   }
-  return json(res, status, body);
+  return json(res, status, body, req);
 }
 
 /**
  * Handle CORS preflight OPTIONS requests
  */
-export function handleCors(res: VercelResponse): VercelResponse {
-  res.setHeader("Access-Control-Allow-Origin", cfg.corsOrigins);
+export function handleCors(res: VercelResponse, req: VercelRequest): VercelResponse {
+  const origin = req.headers?.origin as string | undefined;
+  res.setHeader("Access-Control-Allow-Origin", getCorsOrigin(origin));
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, If-None-Match, X-Api-Key");
   res.setHeader("Access-Control-Max-Age", "86400"); // 24 hours

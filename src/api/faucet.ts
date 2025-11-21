@@ -10,6 +10,7 @@ import {
   PublicKey,
   Transaction,
   clusterApiUrl,
+  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
@@ -18,7 +19,7 @@ import {
   getAccount,
 } from "@solana/spl-token";
 import { json, error, handleCors } from "../lib/http.js";
-import { checkRateLimit, getClientIp, setRateLimitHeaders } from "../lib/rate-limit.js";
+import { checkRateLimit, getClientIp, setRateLimitHeaders, RATE_LIMITS } from "../lib/rate-limit.js";
 import { logRequest, errorLog } from "../lib/logger.js";
 
 const DEVNET_USDT_MINT = "4d79dBszeKpibjrZgiXewW4DCfU2SE4oeiQETbJgnQEh";
@@ -26,50 +27,33 @@ const FAUCET_AMOUNT = 1000; // 1000 USDT
 const USDT_DECIMALS = 9;
 const MIN_SOL_FOR_TX = 5_000_000; // ~0.005 SOL for transaction fees
 
-// Strict rate limit for faucet: 3 requests per hour per IP
-const FAUCET_RATE_LIMIT = {
-  limit: 3,
-  windowSeconds: 3600,
-};
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const start = Date.now();
 
-  // Handle CORS preflight
-  if (req.method === "OPTIONS") {
-    return handleCors(res);
-  }
-
-  if (req.method !== "POST") {
-    return error(res, 405, "Method not allowed");
-  }
-
   try {
-    // Strict rate limiting for faucet (3 per hour per IP)
+    // Handle CORS preflight
+    if (req.method === "OPTIONS") {
+      return handleCors(res, req);
+    }
+
+    if (req.method !== "POST") {
+      return error(res, 405, "Method not allowed", req);
+    }
+
+    // Rate limit check
     const clientIp = getClientIp(req.headers as Record<string, string | string[] | undefined>);
-    const rateLimitResult = await checkRateLimit(`faucet:ip:${clientIp}`, FAUCET_RATE_LIMIT);
-    setRateLimitHeaders(res, rateLimitResult, FAUCET_RATE_LIMIT);
+    const rateLimitResult = await checkRateLimit(`ip:${clientIp}`, RATE_LIMITS.perIp);
+    setRateLimitHeaders(res, rateLimitResult, RATE_LIMITS.perIp);
 
     if (!rateLimitResult.allowed) {
       logRequest("POST", "/api/faucet", 429, Date.now() - start);
-      return error(res, 429, "Too many faucet requests. Please try again later.");
+      return error(res, 429, "Too many requests", req);
     }
 
     const { address } = req.body;
 
     if (!address) {
-      return error(res, 400, "Address required");
-    }
-
-    // Additional rate limit per wallet address (1 per day)
-    const addressRateLimit = await checkRateLimit(`faucet:addr:${address}`, {
-      limit: 1,
-      windowSeconds: 86400, // 24 hours
-    });
-
-    if (!addressRateLimit.allowed) {
-      logRequest("POST", "/api/faucet", 429, Date.now() - start);
-      return error(res, 429, "This wallet already received tokens today. Please try again tomorrow.");
+      return error(res, 400, "Address required", req);
     }
 
     // Validate address
@@ -77,13 +61,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       recipientPubkey = new PublicKey(address);
     } catch {
-      return error(res, 400, "Invalid Solana address");
+      return error(res, 400, "Invalid Solana address", req);
     }
 
     // Check if faucet keypair is configured
     const faucetPrivateKey = process.env.FAUCET_PRIVATE_KEY;
     if (!faucetPrivateKey) {
-      return error(res, 503, "Faucet not configured");
+      return error(res, 503, "Faucet not configured", req);
     }
 
     // Initialize
@@ -100,7 +84,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         available: solBalance,
         required: MIN_SOL_FOR_TX
       });
-      return error(res, 503, "Faucet temporarily unavailable. Please try again later.");
+      return error(res, 503, "Faucet temporarily unavailable. Please try again later.", req);
     }
 
     // Get faucet's token account (treasury)
@@ -118,11 +102,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           available: faucetAccount.amount.toString(),
           required: amount.toString()
         });
-        return error(res, 503, "Faucet temporarily unavailable. Please try again later.");
+        return error(res, 503, "Faucet temporarily unavailable. Please try again later.", req);
       }
     } catch (err) {
       errorLog("Faucet account not found", err);
-      return error(res, 503, "Faucet not configured properly");
+      return error(res, 503, "Faucet not configured properly", req);
     }
 
     // Get recipient ATA
@@ -156,23 +140,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       )
     );
 
-    // Send transaction
-    const signature = await connection.sendTransaction(transaction, [faucetKeypair]);
-    await connection.confirmTransaction(signature, "finalized");
+    // Send transaction and wait for confirmation (not finalization to avoid timeout)
+    const signature = await sendAndConfirmTransaction(
+      connection,
+      transaction,
+      [faucetKeypair],
+      { commitment: "confirmed" }
+    );
 
     logRequest("POST", "/api/faucet", 200, Date.now() - start);
     return json(res, 200, {
       success: true,
       signature,
       amount: FAUCET_AMOUNT,
-    });
+    }, req);
   } catch (err) {
     errorLog("Faucet error", err);
     logRequest("POST", "/api/faucet", 500, Date.now() - start);
+    // Ensure CORS headers on all errors
     return error(
       res,
       500,
       "Faucet failed",
+      req,
       err instanceof Error ? err.message : "Unknown error"
     );
   }

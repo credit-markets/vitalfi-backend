@@ -70,7 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     if (req.method !== "POST") {
-      return error(res, 405, "Method not allowed");
+      return error(res, 405, "Method not allowed", req);
     }
 
     // Read raw body with size validation
@@ -81,7 +81,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const error_msg = err instanceof Error ? err.message : String(err);
       if (error_msg.includes("Payload too large")) {
         errorLog("Webhook payload too large", { error: error_msg });
-        return error(res, 413, "Payload too large");
+        return error(res, 413, "Payload too large", req);
       }
       throw err;
     }
@@ -91,7 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const token = req.headers.authorization as string | undefined;
     if (!token) {
       errorLog("Missing authentication token in webhook request");
-      return error(res, 401, "Invalid token");
+      return error(res, 401, "Invalid token", req);
     }
 
     try {
@@ -99,11 +99,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const secretBuffer = Buffer.from(cfg.heliusSecret);
       if (tokenBuffer.length !== secretBuffer.length || !timingSafeEqual(tokenBuffer, secretBuffer)) {
         errorLog("Invalid authentication token in webhook request");
-        return error(res, 401, "Invalid token");
+        return error(res, 401, "Invalid token", req);
       }
     } catch {
       errorLog("Token comparison failed");
-      return error(res, 401, "Invalid token");
+      return error(res, 401, "Invalid token", req);
     }
 
     // Parse JSON payload
@@ -113,13 +113,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (err) {
       const parseError = err instanceof Error ? err : new Error(String(err));
       errorLog("Failed to parse webhook payload", parseError);
-      return error(res, 400, "Invalid JSON payload");
+      return error(res, 400, "Invalid JSON payload", req);
     }
 
     // Helius sends arrays of transactions (or test pings as [0])
     if (Array.isArray(body) && body.length === 1 && typeof body[0] === "number") {
       info("Helius test ping (numeric array)");
-      return json(res, 200, { ok: true, message: "pong" });
+      return json(res, 200, { ok: true, message: "pong" }, req);
     }
 
     // Normalize to items array
@@ -135,7 +135,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const parsed = rawWebhookPayloadSchema.safeParse(item);
       if (!parsed.success) {
         errorLog("Webhook payload validation failed", new Error(JSON.stringify(parsed.error.issues)));
-        return error(res, 400, "Invalid webhook payload", parsed.error.issues);
+        return error(res, 400, "Invalid webhook payload", req, parsed.error.issues);
       }
     }
 
@@ -631,12 +631,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         positions: positionsProcessed,
         activities: activitiesProcessed,
       },
-    });
+    }, req);
   } catch (err) {
     const duration = Date.now() - start;
     const processingError = err instanceof Error ? err : new Error(String(err));
     errorLog("Webhook processing failed", processingError);
     recordWebhook(duration, 0, 0, 0, true);
-    return error(res, 500, "Internal server error");
+    return error(res, 500, "Internal server error", req);
   }
 }

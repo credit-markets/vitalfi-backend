@@ -19,11 +19,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
-    return handleCors(res);
+    return handleCors(res, req);
   }
 
   if (req.method !== "GET") {
-    return error(res, 405, "Method not allowed");
+    return error(res, 405, "Method not allowed", req);
   }
 
   // Protect with API key if configured
@@ -34,11 +34,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const secretBuffer = Buffer.from(cfg.metricsApiKey);
       if (apiKeyBuffer.length !== secretBuffer.length || !timingSafeEqual(apiKeyBuffer, secretBuffer)) {
         logRequest("GET", "/api/metrics", 401, Date.now() - start);
-        return error(res, 401, "Unauthorized");
+        return error(res, 401, "Unauthorized", req);
       }
     } catch {
       logRequest("GET", "/api/metrics", 401, Date.now() - start);
-      return error(res, 401, "Unauthorized");
+      return error(res, 401, "Unauthorized", req);
     }
   }
 
@@ -60,5 +60,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
 
   logRequest("GET", "/api/metrics", 200, Date.now() - start);
-  return json(res, 200, response);
+  return json(res, 200, response, req);
 }

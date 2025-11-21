@@ -34,6 +34,6 @@ export const cfg = {
   // Metrics
   metricsApiKey: getEnv("METRICS_API_KEY", false) || "",
 
-  // CORS
-  corsOrigins: getEnv("CORS_ORIGINS", false) || "http://localhost:3000",
+  // CORS - hardcoded allowed origins (production + local dev)
+  corsOrigins: "https://app.vitalfi.lat,http://localhost:3000",
 };

@@ -30,11 +30,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Handle CORS preflight
     if (req.method === "OPTIONS") {
-      return handleCors(res);
+      return handleCors(res, req);
     }
 
     if (req.method !== "GET") {
-      return error(res, 405, "Method not allowed");
+      return error(res, 405, "Method not allowed", req);
     }
 
     // Check rate limit by IP
@@ -46,13 +46,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const duration = Date.now() - start;
       logRequest("GET", "/api/positions", 429, duration);
       recordRequest("/api/positions", 429, duration, true);
-      return error(res, 429, "Too many requests");
+      return error(res, 429, "Too many requests", req);
     }
 
     // Validate query params
     const parsed = QuerySchema.safeParse(req.query);
     if (!parsed.success) {
-      return error(res, 400, "Invalid query parameters", parsed.error.issues);
+      return error(res, 400, "Invalid query parameters", req, parsed.error.issues);
     }
 
     const { owner, cursor, limit } = parsed.data;
@@ -79,7 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Hard limit to prevent memory issues with large SETs
       if (pdas.length > MAX_SET_SIZE) {
         errorLog(`SET too large for owner ${owner}`, { positionCount: pdas.length, maxAllowed: MAX_SET_SIZE });
-        return error(res, 503, "Too many positions - ZSET index not ready. Please retry in a few seconds.");
+        return error(res, 503, "Too many positions - ZSET index not ready. Please retry in a few seconds.", req);
       }
 
       // Log warning for large SET fallbacks
@@ -136,13 +136,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const duration = Date.now() - start;
     logRequest("GET", "/api/positions", 200, duration);
     recordRequest("/api/positions", 200, duration);
-    return json(res, 200, body, etag, cfg.cacheTtl);
+    return json(res, 200, body, req, etag, cfg.cacheTtl);
   } catch (err) {
     const queryError = err instanceof Error ? err : new Error(String(err));
     errorLog("Positions query failed", { query: req.query, error: queryError });
     const duration = Date.now() - start;
     logRequest("GET", "/api/positions", 500, duration);
     recordRequest("/api/positions", 500, duration);
-    return error(res, 500, "Internal server error");
+    return error(res, 500, "Internal server error", req);
   }
 }
